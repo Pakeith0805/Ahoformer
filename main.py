@@ -6,6 +6,8 @@ num_head = 8 # ヘッドの数
 d_model = 512 # トークンの次元。単語ベクトルの次元みたいな
 d_k = d_model / num_head
 
+# ================== embedding
+
 # === csvファイルを読み取る
 csv_file = "aho_dataset_standard.csv"
 numbers = []
@@ -46,3 +48,5 @@ for i in range(15):
     word = outputs[i]
     vector = embedded_vectors[i].tolist()  # リスト型に変換
     print(f"Num: {numbers[i]:2d} | Text: {word:4s} -> Vector: {[round(v, 4) for v in vector]}")
+
+# 
