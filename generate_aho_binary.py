@@ -13,8 +13,10 @@ with open(file_name, mode="w", encoding="utf-8-sig", newline="") as f:
     
     # 3. ループを回しながら1行ずつ書き込む
     for i in range(1, 101):
-        # 3の倍数なら1、それ以外は0
-        if i % 3 == 0:
+        # 3の倍数か3がつく数字なら1、それ以外は0
+        is_multiple_of_3 = (i % 3 == 0)
+        contains_3 = ('3' in str(i))
+        if is_multiple_of_3 or contains_3:
             output = 1
         else:
             output = 0
