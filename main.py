@@ -2,6 +2,9 @@ import csv
 import torch
 import torch.nn as nn # embeddingに使う
 import torch.optim as optim # optimizerを使う
+import config
+import dataset
+from models import Ahoformer
 
 num_head = 1 # ヘッドの数
 d_model = 4 # トークンの次元。単語ベクトルの次元みたいな
