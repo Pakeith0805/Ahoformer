@@ -23,11 +23,12 @@ with open(csv_file, mode="r", encoding="utf-8-sig") as f:
         outputs.append(row["output"])  # "1", "2", "Aho", ... が入る
 
 # 右詰めで8文字にする。空白で埋める。
+numbers_split = [list(f"{word:>8}") for word in numbers]
 outputs_split = [list(f"{word:>8}") for word in outputs]
 
 # ユニークな文字を抽出。0～9とAhoになるはず。
 all_chars = set()
-for seq in outputs_split:
+for seq in numbers_split + outputs_split:
     for char in seq:
         all_chars.add(char)
 
@@ -37,18 +38,21 @@ char_to_id = {char: idx for idx, char in enumerate(unique_chars)}
 id_to_char = {idx: char for char, idx in char_to_id.items()}
 
 num_embeddings = len(char_to_id)  # 単語の種類数（行数）
-embedding_dim = d_model                 # ベクトルの次元数（列数）
+embedding_dim = d_model           # ベクトルの次元数（列数）
 
 
 # === テキストをidに変換し、tensorにする
-input_ids = [[char_to_id[char] for char in seq] for seq in outputs_split] # 右詰めのリストをidに変換している
-input_tensor = torch.tensor(input_ids, dtype=torch.long) # それをtensorにしている。
+input_ids = [[char_to_id[char] for char in seq] for seq in numbers_split] # 右詰めのリストをidに変換している
+input_tensor = torch.tensor(input_ids, dtype=torch.long)  # それをテンソルにしている。形状: (N, 8)
+target_ids = [[char_to_id[char] for char in seq] for seq in outputs_split]
+target_tensor = torch.tensor(target_ids, dtype=torch.long)  # 形状: (N, 8)
 
 # === ただのtensorとして重み行列を作成
 embedding_layer = nn.Embedding(num_embeddings, embedding_dim)
 
 # === idを対応するベクトルにする。てか行列。このままQ, K, Vにできる。
 embedded_vectors = embedding_layer(input_tensor).detach()
+target_vectors = embedding_layer(target_tensor).detach()     # 正解ベクトル (N, 8, 4)
 
 # 確認表示
 print(f"辞書（文字数: {num_embeddings}）: {char_to_id}")
@@ -73,7 +77,7 @@ optimizer = optim.Adam( # 学習対象を設定
 )
 criterion = nn.MSELoss() # 損失関数。これは平均二乗誤差
 
-epochs = 100
+epochs = 1000
 
 # === 学習開始
 print("--- 学習開始 ---")
@@ -91,7 +95,7 @@ for epoch in range (epochs):
     attention = torch.matmul(attention_weights, V)
 
     # 損失の計算
-    loss = criterion(attention, embedded_vectors) # (input(予測値), target(正解))
+    loss = criterion(attention, target_vectors) # (input(予測値), target(正解))
 
     # 誤差逆伝播
     optimizer.zero_grad() # 勾配の初期化
@@ -119,7 +123,7 @@ with torch.no_grad(): # withは、自動で後処理を実行してくれる文�
 
 # 結果を表示
 print("\n--- 学習後の予測結果 (前半15件) ---")
-for i in range(200):
+for i in range(100):
     num = numbers[i]
     orig_word = outputs[i]
     pred_chars = [id_to_char[idx.item()] for idx in predicted_ids[i]]
