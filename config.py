@@ -4,7 +4,7 @@
 num_head = 1
 d_model = 4
 d_k = d_model // num_head
-epochs = 150
+epochs = 10000
 lr = 0.01
 # --- スイッチの設定 ---
 USE_RESIDUAL = False   # 残差接続を使うか
