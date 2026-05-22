@@ -77,9 +77,9 @@ distances = torch.cdist(attention, embedding_layer.weight)
 predicted_ids = torch.argmin(distances, dim=-1)
 
 # === 予測した単語
-# === 予測されたIDから単語に復元して表示
+# 予測されたIDから単語に復元して表示
 print("\n--- アテンションによる予測結果 (前半15件) ---")
-for i in range(15):
+for i in range(40):
     # 元のデータ
     num = numbers[i]
     orig_word = outputs[i]
