@@ -13,42 +13,53 @@ d_k = d_model // num_head
 csv_file = "aho_dataset_standard.csv"
 numbers = []
 outputs = []
+len_seq = 8 # リストの長さ。扱える数字の桁数の最大
 
 with open(csv_file, mode="r", encoding="utf-8-sig") as f:
     # DictReaderを使って列名でアクセス
     reader = csv.DictReader(f)
     for row in reader:
-        numbers.append(int(row["number"]))
+        numbers.append(row["number"])  # "1", "2", "3", ... が入る。intに変換しない
         outputs.append(row["output"])  # "1", "2", "Aho", ... が入る
 
-# === 単語の辞書を作る
+# 右詰めで8文字にする。空白で埋める。
+outputs_split = [list(f"{word:>8}") for word in outputs]
 
-unique_words = list(set(outputs))
-unique_words.sort()
+# ユニークな文字を抽出。0～9とAhoになるはず。
+all_chars = set()
+for seq in outputs_split:
+    for char in seq:
+        all_chars.add(char)
 
-word_to_id = {word: idx for idx, word in enumerate(unique_words)}
+# idと文字の対応付け
+unique_chars = sorted(list(all_chars))
+char_to_id = {char: idx for idx, char in enumerate(unique_chars)}
+id_to_char = {idx: char for char, idx in char_to_id.items()}
 
-num_embeddings = len(word_to_id)  # 単語の種類数（行数）
+num_embeddings = len(char_to_id)  # 単語の種類数（行数）
 embedding_dim = d_model                 # ベクトルの次元数（列数）
 
-# === ただのテンソルとして重み行列を作成
 
+# === テキストをidに変換し、tensorにする
+input_ids = [[char_to_id[char] for char in seq] for seq in outputs_split] # 右詰めのリストをidに変換している
+input_tensor = torch.tensor(input_ids, dtype=torch.long) # それをtensorにしている。
+
+# === ただのtensorとして重み行列を作成
 embedding_layer = nn.Embedding(num_embeddings, embedding_dim)
-
-# === テキストをidに変換し、pytorchで扱えるテンソルにする
-input_ids = [word_to_id[word] for word in outputs] # テキストをidに変換
-input_tensor = torch.tensor(input_ids, dtype=torch.long) # テンソルにする
 
 # === idを対応するベクトルにする。てか行列。このままQ, K, Vにできる。
 embedded_vectors = embedding_layer(input_tensor).detach()
 
-# === 結果の確認
-print(f"Embedding層の構造: {embedding_layer}")
-print("--- nn.Embedding を使った結果 (前半15件) ---")
-for i in range(15):
-    word = outputs[i]
-    vector = embedded_vectors[i].tolist()  # リスト型に変換
-    print(f"Num: {numbers[i]:2d} | Text: {word:4s} -> Vector: {[round(v, 4) for v in vector]}")
+# 確認表示
+print(f"辞書（文字数: {num_embeddings}）: {char_to_id}")
+print(f"入力テンソルの形状: {input_tensor.shape}")       # 例: torch.Size([9999, 8])
+print(f"埋め込みテンソルの形状: {embedded_vectors.shape}") # 例: torch.Size([9999, 8, 4])
+# 最初の3件のデータを確認
+for i in range(3):
+    orig = outputs[i]
+    split = outputs_split[i]
+    ids = input_ids[i]
+    print(f"元の単語: {orig:6s} -> 分割: {split} -> ID: {ids}")
 
 # === Q,K,Vを生成
 w_q = nn.Linear(d_model, d_k, bias=False)  # 重み行列 W_Q
@@ -74,7 +85,10 @@ for epoch in range (epochs):
     V = w_v(embedded_vectors)
 
     # attentionを算出
-    attention = torch.softmax(Q @ K.T, dim=1) @ V
+    # Q,K: (単語ベクトルの本数, 数字の桁数, d_k)
+    scores = torch.matmul(Q, K.transpose(1, 2)) # この場合、単語ベクトルの本数部分に関して、行列計算は行わない。そこは固定
+    attention_weights = torch.softmax(scores, dim=1)
+    attention = torch.matmul(attention_weights, V)
 
     # 損失の計算
     loss = criterion(attention, embedded_vectors) # (input(予測値), target(正解))
@@ -95,7 +109,9 @@ with torch.no_grad(): # withは、自動で後処理を実行してくれる文�
     K = w_k(embedded_vectors)
     V = w_v(embedded_vectors)
 
-    attention = torch.softmax(Q @ K.T, dim=1) @ V
+    scores = torch.matmul(Q, K.transpose(1, 2))
+    attention_weights = torch.softmax(scores, dim=1)
+    attention = torch.matmul(attention_weights, V)
 
     # 平均二乗誤差使うと、足しちゃうからダメ
     distances = torch.cdist(attention, embedding_layer.weight) # attentionの出力と単語ベクトルを照らし合わせ、全部の距離を計算している。
@@ -103,9 +119,9 @@ with torch.no_grad(): # withは、自動で後処理を実行してくれる文�
 
 # 結果を表示
 print("\n--- 学習後の予測結果 (前半15件) ---")
-for i in range(15):
+for i in range(200):
     num = numbers[i]
     orig_word = outputs[i]
-    pred_id = predicted_ids[i].item()
-    pred_word = unique_words[pred_id]
-    print(f"Num: {num:2d} | 元の単語: {orig_word:4s} -> 予測された単語: {pred_word}")
+    pred_chars = [id_to_char[idx.item()] for idx in predicted_ids[i]]
+    pred_word = "".join(pred_chars).strip()
+    print(f"Num: {num} | 元の単語: {orig_word:4s} -> 予測された単語: {pred_word}")
