@@ -1,6 +1,7 @@
 import csv
 import torch
 import torch.nn as nn # embeddingに使う
+import torch.optim as optim # optimizerを使う
 
 num_head = 1 # ヘッドの数
 d_model = 4 # トークンの次元。単語ベクトルの次元みたいな
@@ -39,7 +40,7 @@ input_ids = [word_to_id[word] for word in outputs] # テキストをidに変換
 input_tensor = torch.tensor(input_ids, dtype=torch.long) # テンソルにする
 
 # === idを対応するベクトルにする。てか行列。このままQ, K, Vにできる。
-embedded_vectors = embedding_layer(input_tensor)
+embedded_vectors = embedding_layer(input_tensor).detach()
 
 # === 結果の確認
 print(f"Embedding層の構造: {embedding_layer}")
@@ -54,39 +55,57 @@ w_q = nn.Linear(d_model, d_k, bias=False)  # 重み行列 W_Q
 w_k = nn.Linear(d_model, d_k, bias=False)  # 重み行列 W_K
 w_v = nn.Linear(d_model, d_k, bias=False)  # 重み行列 W_V
 
-Q = w_q(embedded_vectors)
-K = w_k(embedded_vectors)
-V = w_v(embedded_vectors)
+# === 学習の設定
+optimizer = optim.Adam( # 学習対象を設定
+    list(w_q.parameters()) + list(w_k.parameters()) + list(w_v.parameters()), # 学習対象となる重みを連結
+    lr = 0.01 # 学習率
+)
+criterion = nn.MSELoss() # 損失関数。これは平均二乗誤差
 
-# === attentionを算出
+epochs = 100
 
-attention = torch.softmax(Q @ K.T, dim=1) @ V
+# === 学習開始
+print("--- 学習開始 ---")
+
+for epoch in range (epochs):
+    # 順伝播
+    Q = w_q(embedded_vectors)
+    K = w_k(embedded_vectors)
+    V = w_v(embedded_vectors)
+
+    # attentionを算出
+    attention = torch.softmax(Q @ K.T, dim=1) @ V
+
+    # 損失の計算
+    loss = criterion(attention, embedded_vectors) # (input(予測値), target(正解))
+
+    # 誤差逆伝播
+    optimizer.zero_grad() # 勾配の初期化
+    loss.backward() # 誤差逆伝播。どう動かせばいいか学習する
+    optimizer.step() # 重みの更新。backwardで計算した結果をもとに実際に更新する
+
+    # 10エポックごとに損失を表示
+    if (epoch + 1) % 10 == 0:
+        print(f"Epoch {epoch+1:3d}/{epochs} | Loss: {loss.item():.6f}")
 
 # === 単語を予測
 
-# 単語予測用の線形レイヤー
-# lm_head = nn.Linear(int(d_k), num_embeddings)
+with torch.no_grad(): # withは、自動で後処理を実行してくれる文。
+    Q = w_q(embedded_vectors)
+    K = w_k(embedded_vectors)
+    V = w_v(embedded_vectors)
 
-# 予測スコアの計算。どの単語の確率が一番高いか
-# logits = lm_head(attention)
+    attention = torch.softmax(Q @ K.T, dim=1) @ V
 
-# ユークリッド距離を計算
-distances = torch.cdist(attention, embedding_layer.weight)
+    # 平均二乗誤差使うと、足しちゃうからダメ
+    distances = torch.cdist(attention, embedding_layer.weight) # attentionの出力と単語ベクトルを照らし合わせ、全部の距離を計算している。
+    predicted_ids = torch.argmin(distances, dim=-1)
 
-# ユークリッド距離最小の単語を見つける。
-predicted_ids = torch.argmin(distances, dim=-1)
-
-# === 予測した単語
-# 予測されたIDから単語に復元して表示
-print("\n--- アテンションによる予測結果 (前半15件) ---")
-for i in range(40):
-    # 元のデータ
+# 結果を表示
+print("\n--- 学習後の予測結果 (前半15件) ---")
+for i in range(15):
     num = numbers[i]
     orig_word = outputs[i]
-    
-    # 予測されたIDを取り出し、単語に変換
-    # .item() を使うことで、PyTorchのテンソルから普通のPythonの数値（int）に変換します
     pred_id = predicted_ids[i].item()
     pred_word = unique_words[pred_id]
-    
     print(f"Num: {num:2d} | 元の単語: {orig_word:4s} -> 予測された単語: {pred_word}")
