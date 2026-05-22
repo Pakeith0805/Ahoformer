@@ -12,7 +12,7 @@ with open(file_name, mode="w", encoding="utf-8-sig", newline="") as f:
     writer.writeheader()
     
     # 3. ループを回しながら1行ずつ書き込む
-    for i in range(1, 10000):
+    for i in range(1, 101):
         # 3の倍数なら1、それ以外は0
         if i % 3 == 0:
             output = 1

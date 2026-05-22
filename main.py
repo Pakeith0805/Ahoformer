@@ -2,9 +2,9 @@ import csv
 import torch
 import torch.nn as nn # embeddingに使う
 
-num_head = 8 # ヘッドの数
-d_model = 512 # トークンの次元。単語ベクトルの次元みたいな
-d_k = d_model / num_head
+num_head = 2 # ヘッドの数
+d_model = 4 # トークンの次元。単語ベクトルの次元みたいな
+d_k = d_model // num_head
 
 # ================== embedding
 
@@ -38,7 +38,7 @@ embedding_layer = nn.Embedding(num_embeddings, embedding_dim)
 input_ids = [word_to_id[word] for word in outputs] # テキストをidに変換
 input_tensor = torch.tensor(input_ids, dtype=torch.long) # テンソルにする
 
-# === idを対応するベクトルにする
+# === idを対応するベクトルにする。てか行列。このままQ, K, Vにできる。
 embedded_vectors = embedding_layer(input_tensor)
 
 # === 結果の確認
@@ -49,4 +49,13 @@ for i in range(15):
     vector = embedded_vectors[i].tolist()  # リスト型に変換
     print(f"Num: {numbers[i]:2d} | Text: {word:4s} -> Vector: {[round(v, 4) for v in vector]}")
 
-# 
+# === Q,K,Vを生成
+w_q = nn.Linear(d_model, d_k, bias=False)  # 重み行列 W_Q
+w_k = nn.Linear(d_model, d_k, bias=False)  # 重み行列 W_K
+w_v = nn.Linear(d_model, d_k, bias=False)  # 重み行列 W_V
+
+Q = w_q(embedded_vectors)
+K = w_k(embedded_vectors)
+V = w_v(embedded_vectors)
+
+torch.softmax(Q @ K.T, dim=1) @ V
