@@ -51,13 +51,13 @@ target_tensor = torch.tensor(target_ids, dtype=torch.long)  # 形状: (N, 8)
 embedding_layer = nn.Embedding(num_embeddings, embedding_dim)
 
 # === idを対応するベクトルにする。てか行列。このままQ, K, Vにできる。
-embedded_vectors = embedding_layer(input_tensor).detach()
+input_vectors = embedding_layer(input_tensor).detach()
 target_vectors = embedding_layer(target_tensor).detach()     # 正解ベクトル (N, 8, 4)
 
 # 確認表示
 print(f"辞書（文字数: {num_embeddings}）: {char_to_id}")
 print(f"入力テンソルの形状: {input_tensor.shape}")       # 例: torch.Size([9999, 8])
-print(f"埋め込みテンソルの形状: {embedded_vectors.shape}") # 例: torch.Size([9999, 8, 4])
+print(f"埋め込みテンソルの形状: {input_vectors.shape}") # 例: torch.Size([9999, 8, 4])
 # 最初の3件のデータを確認
 for i in range(3):
     orig = outputs[i]
@@ -84,9 +84,9 @@ print("--- 学習開始 ---")
 
 for epoch in range (epochs):
     # 順伝播
-    Q = w_q(embedded_vectors)
-    K = w_k(embedded_vectors)
-    V = w_v(embedded_vectors)
+    Q = w_q(input_vectors)
+    K = w_k(input_vectors)
+    V = w_v(input_vectors)
 
     # attentionを算出
     # Q,K: (単語ベクトルの本数, 数字の桁数, d_k)
@@ -109,9 +109,9 @@ for epoch in range (epochs):
 # === 単語を予測
 
 with torch.no_grad(): # withは、自動で後処理を実行してくれる文。
-    Q = w_q(embedded_vectors)
-    K = w_k(embedded_vectors)
-    V = w_v(embedded_vectors)
+    Q = w_q(input_vectors)
+    K = w_k(input_vectors)
+    V = w_v(input_vectors)
 
     scores = torch.matmul(Q, K.transpose(1, 2))
     attention_weights = torch.softmax(scores, dim=1)
