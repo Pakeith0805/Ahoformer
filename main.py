@@ -2,7 +2,7 @@ import csv
 import torch
 import torch.nn as nn # embeddingに使う
 
-num_head = 2 # ヘッドの数
+num_head = 1 # ヘッドの数
 d_model = 4 # トークンの次元。単語ベクトルの次元みたいな
 d_k = d_model // num_head
 
@@ -58,4 +58,35 @@ Q = w_q(embedded_vectors)
 K = w_k(embedded_vectors)
 V = w_v(embedded_vectors)
 
-torch.softmax(Q @ K.T, dim=1) @ V
+# === attentionを算出
+
+attention = torch.softmax(Q @ K.T, dim=1) @ V
+
+# === 単語を予測
+
+# 単語予測用の線形レイヤー
+# lm_head = nn.Linear(int(d_k), num_embeddings)
+
+# 予測スコアの計算。どの単語の確率が一番高いか
+# logits = lm_head(attention)
+
+# ユークリッド距離を計算
+distances = torch.cdist(attention, embedding_layer.weight)
+
+# ユークリッド距離最小の単語を見つける。
+predicted_ids = torch.argmin(distances, dim=-1)
+
+# === 予測した単語
+# === 予測されたIDから単語に復元して表示
+print("\n--- アテンションによる予測結果 (前半15件) ---")
+for i in range(15):
+    # 元のデータ
+    num = numbers[i]
+    orig_word = outputs[i]
+    
+    # 予測されたIDを取り出し、単語に変換
+    # .item() を使うことで、PyTorchのテンソルから普通のPythonの数値（int）に変換します
+    pred_id = predicted_ids[i].item()
+    pred_word = unique_words[pred_id]
+    
+    print(f"Num: {num:2d} | 元の単語: {orig_word:4s} -> 予測された単語: {pred_word}")
