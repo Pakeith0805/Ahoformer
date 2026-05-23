@@ -33,5 +33,11 @@ num_embeddings = len(char_to_id)  # 単語の種類数（行数）
 # === テキストをidに変換し、tensorにする
 input_ids = [[char_to_id[char] for char in seq] for seq in numbers_split] # 右詰めのリストをidに変換している
 input_tensor = torch.tensor(input_ids, dtype=torch.long)  # それをテンソルにしている。形状: (N, 8)
-target_ids = [[char_to_id[char] for char in seq] for seq in outputs_split]
-target_tensor = torch.tensor(target_ids, dtype=torch.long)  # 形状: (N, 8)
+
+# 系列を出力する場合のtarget tensor
+target_ids_seq = [[char_to_id[char] for char in seq] for seq in outputs_split]
+target_tensor_seq = torch.tensor(target_ids_seq, dtype=torch.long)  # 形状: (N, 8)
+
+# 2値分類の場合のtarget tensor
+target_ids_bin = [int(word) for word in outputs]
+target_tensor_bin = torch.tensor(target_ids_bin, dtype=torch.float32).unsqueeze(1) # 出力とtargetのデータ型が一致している必要があるためfloatに
