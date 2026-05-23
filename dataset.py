@@ -41,3 +41,26 @@ target_tensor_seq = torch.tensor(target_ids_seq, dtype=torch.long)  # 形状: (N
 # 2値分類の場合のtarget tensor
 target_ids_bin = [int(word) for word in outputs]
 target_tensor_bin = torch.tensor(target_ids_bin, dtype=torch.float32).unsqueeze(1) # 出力とtargetのデータ型が一致している必要があるためfloatに
+
+
+
+# === 未知データの変換
+
+def encode_numbers(number_list, max_len=8):
+    """
+    任意の数字リストをモデル入力用のテンソルに変換する
+    例: [101, 102] -> 右詰め8文字にしてID化したテンソル
+    """
+    # 数値を文字列にし、右詰め8文字のリストにする
+    padded_list = [list(f"{str(num):>{max_len}}") for num in number_list]
+    
+    # 登録されている文字辞書を使ってIDに変換
+    input_ids = []
+    for seq in padded_list:
+        row_ids = []
+        for char in seq:
+            # 万が一、辞書にない文字が含まれていた場合は空白 ' ' に置き換える安全策
+            row_ids.append(char_to_id.get(char, char_to_id[' ']))
+        input_ids.append(row_ids)
+        
+    return torch.tensor(input_ids, dtype=torch.long)

@@ -74,7 +74,7 @@ for i in range(100):
  
 # 結果を表示 2値
 print("\n--- 学習後の予測結果 (前半15件) ---")
-for i in range(200):
+for i in range(1000):
     num = dataset.numbers[i]  # 元の数字 (文字列)
     orig_label = int(dataset.outputs[i])  # 正解ラベル (0 または 1)
     pred_label = predicted_ids[i].item()  # 予測ラベル (0 または 1)
@@ -84,3 +84,50 @@ for i in range(200):
     pred_display = "Aho" if pred_label == 1 else num
     
     print(f"Num: {num:>3s} | 正解: {orig_display:4s} -> 予測: {pred_display}")
+
+
+
+# ==========================================
+# === 未知のデータ (101〜150) でのテスト推論
+# ==========================================
+test_numbers = list(range(2001, 3000))  # 学習時に見せていないデータ
+
+# 1. 追加した関数でテストデータをテンソルに変換
+test_input_tensor = dataset.encode_numbers(test_numbers)
+
+# 2. モデルを評価モードにして推論を実行
+model.eval()
+with torch.no_grad():
+    logits, _ = model(test_input_tensor)
+    probs = torch.sigmoid(logits)
+    predicted_labels = (probs >= 0.5).long()
+
+# 3. テストデータの正解ラベル (0 or 1) をプログラム側で計算しておく
+test_targets = []
+for n in test_numbers:
+    is_multiple_of_3 = (n % 3 == 0)
+    contains_3 = ('3' in str(n))
+    test_targets.append(1 if (is_multiple_of_3 or contains_3) else 0)
+
+# 4. 結果の表示と正答率の計算
+print("\n--- 未知のデータ (101〜150) での予測結果 ---")
+correct_count = 0
+
+for i, num in enumerate(test_numbers):
+    orig_label = test_targets[i]
+    pred_label = predicted_labels[i].item()
+    
+    # 1のときは "Aho"、0のときは元の数字を表示用に整形
+    orig_display = "Aho" if orig_label == 1 else str(num)
+    pred_display = "Aho" if pred_label == 1 else str(num)
+    
+    # 正解・不正解のマーク判定
+    status = "◯" if orig_label == pred_label else "×"
+    if orig_label == pred_label:
+        correct_count += 1
+        
+    print(f"Num: {num:>3d} | 正解: {orig_display:4s} -> 予測: {pred_display:4s} | {status}")
+
+# 全体の正答率を表示
+accuracy = (correct_count / len(test_numbers)) * 100
+print(f"\n未知データでの正解率 (Accuracy): {accuracy:.1f}% ({correct_count}/{len(test_numbers)})")
