@@ -44,15 +44,20 @@ embedding_dim = d_model           # ベクトルの次元数（列数）
 # === テキストをidに変換し、tensorにする
 input_ids = [[char_to_id[char] for char in seq] for seq in numbers_split] # 右詰めのリストをidに変換している
 input_tensor = torch.tensor(input_ids, dtype=torch.long)  # それをテンソルにしている。形状: (N, 8)
-target_ids = [[char_to_id[char] for char in seq] for seq in outputs_split]
-target_tensor = torch.tensor(target_ids, dtype=torch.long)  # 形状: (N, 8)
+# 系列の場合のtarget
+# target_ids = [[char_to_id[char] for char in seq] for seq in outputs_split]
+# target_tensor = torch.tensor(target_ids, dtype=torch.long)  # 形状: (N, 8)
+# 2値分類の場合のtarget tensor
+target_ids = [int(word) for word in outputs]
+target_tensor = torch.tensor(target_ids, dtype=torch.float32).unsqueeze(1) # 出力とtargetのデータ型が一致している必要があるためfloatに
 
 # === ただのtensorとして重み行列を作成
 embedding_layer = nn.Embedding(num_embeddings, embedding_dim)
 
 # === idを対応するベクトルにする。てか行列。このままQ, K, Vにできる。
 embedded_vectors = embedding_layer(input_tensor).detach()
-target_vectors = embedding_layer(target_tensor).detach()     # 正解ベクトル (N, 8, 4)
+# 2値分類では不要
+# target_vectors = embedding_layer(target_tensor).detach()     # 正解ベクトル (N, 8, 4)
 
 # 確認表示
 print(f"辞書（文字数: {num_embeddings}）: {char_to_id}")
@@ -70,12 +75,18 @@ w_q = nn.Linear(d_model, d_k, bias=False)  # 重み行列 W_Q
 w_k = nn.Linear(d_model, d_k, bias=False)  # 重み行列 W_K
 w_v = nn.Linear(d_model, d_k, bias=False)  # 重み行列 W_V
 
+# 8文字を2値に分類するFFN
+classifier = nn.Linear(8 * d_k, 1)
+
 # === 学習の設定
 optimizer = optim.Adam( # 学習対象を設定
-    list(w_q.parameters()) + list(w_k.parameters()) + list(w_v.parameters()), # 学習対象となる重みを連結
+    list(w_q.parameters()) + list(w_k.parameters()) + list(w_v.parameters()) + list(classifier.parameters()), # 学習対象となる重みを連結
     lr = 0.01 # 学習率
 )
-criterion = nn.MSELoss() # 損失関数。これは平均二乗誤差
+# 系列変換モデル用
+# criterion = nn.MSELoss() # 損失関数。これは平均二乗誤差
+# 2値分類用
+criterion = nn.BCEWithLogitsLoss()
 
 epochs = 1000
 
@@ -83,7 +94,9 @@ epochs = 1000
 print("--- 学習開始 ---")
 
 for epoch in range (epochs):
-    # 順伝播
+    # 順伝播。系列
+    # attention = ...
+    # 順伝播。2値分類
     Q = w_q(embedded_vectors)
     K = w_k(embedded_vectors)
     V = w_v(embedded_vectors)
@@ -94,8 +107,17 @@ for epoch in range (epochs):
     attention_weights = torch.softmax(scores, dim=1)
     attention = torch.matmul(attention_weights, V)
 
-    # 損失の計算
-    loss = criterion(attention, target_vectors) # (input(予測値), target(正解))
+    # フラット化して全結合層に入力し、ロジット (logits) を計算
+    flat_out = attention.view(attention.size(0), -1)  # 形状: (Batch, 8 * d_k)
+    logits = classifier(flat_out)  # 形状: (Batch, 1)
+
+    # 2値分類では不要
+    # target_vectors = ...
+
+    # 損失の計算。系列
+    # loss = criterion(attention, target_vectors)
+    # 損失の計算。2値分類
+    loss = criterion(logits, target_tensor)
 
     # 誤差逆伝播
     optimizer.zero_grad() # 勾配の初期化
@@ -109,6 +131,9 @@ for epoch in range (epochs):
 # === 単語を予測
 
 with torch.no_grad(): # withは、自動で後処理を実行してくれる文。
+    # 系列
+    # attention = ...
+    # 2値
     Q = w_q(embedded_vectors)
     K = w_k(embedded_vectors)
     V = w_v(embedded_vectors)
@@ -117,11 +142,18 @@ with torch.no_grad(): # withは、自動で後処理を実行してくれる文�
     attention_weights = torch.softmax(scores, dim=1)
     attention = torch.matmul(attention_weights, V)
 
-    # 平均二乗誤差使うと、足しちゃうからダメ
-    distances = torch.cdist(attention, embedding_layer.weight) # attentionの出力と単語ベクトルを照らし合わせ、全部の距離を計算している。
-    predicted_ids = torch.argmin(distances, dim=-1)
+    flat_out = attention.view(attention.size(0), -1)
+    logits = classifier(flat_out)
 
-# 結果を表示
+    # 系列での予測
+    # distances = torch.cdist(attention, embedding_layer.weight) # attentionの出力と単語ベクトルを照らし合わせ、全部の距離を計算している。
+    # predicted_ids = torch.argmin(distances, dim=-1)
+    # 2値
+    probs = torch.sigmoid(logits)
+    predicted_ids = (probs >= 0.5).long()
+
+# 結果を表示。系列
+"""
 print("\n--- 学習後の予測結果 (前半15件) ---")
 for i in range(100):
     num = numbers[i]
@@ -129,3 +161,17 @@ for i in range(100):
     pred_chars = [id_to_char[idx.item()] for idx in predicted_ids[i]]
     pred_word = "".join(pred_chars).strip()
     print(f"Num: {num} | 元の単語: {orig_word:4s} -> 予測された単語: {pred_word}")
+"""
+
+# 結果を表示 2値
+print("\n--- 学習後の予測結果 (前半15件) ---")
+for i in range(100):
+    num = numbers[i]  # 元の数字 (文字列)
+    orig_label = int(outputs[i])  # 正解ラベル (0 または 1)
+    pred_label = predicted_ids[i].item()  # 予測ラベル (0 または 1)
+
+    # 1のときは "Aho"、0のときは元の数字を表示用にする
+    orig_display = "Aho" if orig_label == 1 else num
+    pred_display = "Aho" if pred_label == 1 else num
+
+    print(f"Num: {num:>3s} | 正解: {orig_display:4s} -> 予測: {pred_display}")
