@@ -7,6 +7,7 @@ d_k = d_model // num_head
 epochs = 1000
 lr = 0.01
 num_digits = 8 # 何桁の数字まで扱えるようにするか
+d_ff = 16 # FFNの中間層の隠れ次元数
 # --- スイッチの設定 ---
 USE_RESIDUAL = False   # 残差接続を使うか
 USE_LAYERNORM = False  # レイヤー正規化を使うか
