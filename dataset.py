@@ -1,6 +1,7 @@
 # データセットを読み解くよ
 import csv
 import torch
+import config
 
 csv_file = "aho_dataset_standard.csv"
 numbers = []
@@ -14,10 +15,11 @@ with open(csv_file, mode="r", encoding="utf-8-sig") as f:
         outputs.append(row["output"])  # "1", "2", "Aho", ... が入る
 
 # 右詰めで8文字にする。空白で埋める。
-numbers_split = [list(f"{word:>8}") for word in numbers]
-outputs_split = [list(f"{word:>8}") for word in outputs]
+numbers_split = [list(f"{word:>{config.num_digits}}") for word in numbers]
+outputs_split = [list(f"{word:>{config.num_digits}}") for word in outputs]
 
-# ユニークな文字を抽出。0～9とAhoになるはず。
+# ユニークな文字を抽出。0～9とAhoになるはず。(系列)
+# 2値分類なら数字になる。あと空白
 all_chars = set()
 for seq in numbers_split + outputs_split:
     for char in seq:
@@ -32,11 +34,11 @@ num_embeddings = len(char_to_id)  # 単語の種類数（行数）
 
 # === テキストをidに変換し、tensorにする
 input_ids = [[char_to_id[char] for char in seq] for seq in numbers_split] # 右詰めのリストをidに変換している
-input_tensor = torch.tensor(input_ids, dtype=torch.long)  # それをテンソルにしている。形状: (N, 8)
+input_tensor = torch.tensor(input_ids, dtype=torch.long)  # それをテンソルにしている。形状: (単語数, 8)
 
 # 系列を出力する場合のtarget tensor
 target_ids_seq = [[char_to_id[char] for char in seq] for seq in outputs_split]
-target_tensor_seq = torch.tensor(target_ids_seq, dtype=torch.long)  # 形状: (N, 8)
+target_tensor_seq = torch.tensor(target_ids_seq, dtype=torch.long)  # 形状: (単語数, 8)
 
 # 2値分類の場合のtarget tensor
 target_ids_bin = [int(word) for word in outputs]
@@ -46,7 +48,7 @@ target_tensor_bin = torch.tensor(target_ids_bin, dtype=torch.float32).unsqueeze(
 
 # === 未知データの変換
 
-def encode_numbers(number_list, max_len=8):
+def encode_numbers(number_list, max_len=config.num_digits):
     """
     任意の数字リストをモデル入力用のテンソルに変換する
     例: [101, 102] -> 右詰め8文字にしてID化したテンソル

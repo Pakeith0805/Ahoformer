@@ -1,4 +1,3 @@
-import csv
 import torch
 import torch.nn as nn # embeddingに使う
 import torch.optim as optim # optimizerを使う
@@ -90,6 +89,7 @@ for i in range(1000):
 # ==========================================
 # === 未知のデータ (101〜150) でのテスト推論
 # ==========================================
+
 test_numbers = list(range(2001, 3000))  # 学習時に見せていないデータ
 
 # 1. 追加した関数でテストデータをテンソルに変換

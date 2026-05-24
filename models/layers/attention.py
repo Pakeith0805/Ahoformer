@@ -3,6 +3,7 @@
 # input: d_model, d_k, embeddingが終わった直後の行列x
 # output: attention
 
+
 import torch
 import torch.nn as nn
 
