@@ -10,7 +10,7 @@ import torch.nn as nn
 class SelfAttention(nn.Module):
     def __init__(self, d_model, d_k):
         super().__init__()
-        self.w_q = nn.Linear(d_model, d_k, bias=False)
+        self.w_q = nn.Linear(d_model, d_k, bias=False) # 入力×出力
         self.w_k = nn.Linear(d_model, d_k, bias=False)
         self.w_v = nn.Linear(d_model, d_k, bias=False)
 
