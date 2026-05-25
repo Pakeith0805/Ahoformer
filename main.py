@@ -1,132 +1,148 @@
 import torch
-import torch.nn as nn # embeddingに使う
-import torch.optim as optim # optimizerを使う
+import torch.nn as nn
+import torch.optim as optim
 import config
 import dataset
 from models import Ahoformer
 
+# デバイスの設定 (GPUがあれば使用)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
 # モデルと損失関数の作成
-model = Ahoformer(dataset.num_embeddings) # num_embeddingsは単語の種類数。
-# 系列変換モデル用
-# criterion = nn.MSELoss() # 損失関数。これは平均二乗誤差
-# 2値分類用
-criterion = nn.BCEWithLogitsLoss()
+model = Ahoformer(dataset.num_embeddings).to(device)
 
-# === 学習の設定
-optimizer = optim.Adam(model.parameters(), lr=config.lr)
+# 多クラス分類用の交差エントロピー
+criterion = nn.CrossEntropyLoss()
 
-# === 訓練データ
-input_tensor = dataset.input_tensor
-target_tensor = dataset.target_tensor_bin
+# 学習の設定 (Transformerの学習率としては0.001が安定します)
+optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-# === 学習開始
+# 訓練データ
+input_tensor = dataset.input_tensor.to(device)         # (Batch, 8)
+target_tensor = dataset.target_tensor_seq.to(device)   # (Batch, 8)
+
+# デコーダの入力 (tgt) の準備
+# Teacher Forcing用のターゲット。先頭に開始トークン（スペースのID）を追加し、最後の1文字を削る
+batch_size = input_tensor.size(0)
+sos_id = dataset.char_to_id[' ']
+sos_tokens = torch.full((batch_size, 1), sos_id, dtype=torch.long, device=device)
+decoder_input = torch.cat([sos_tokens, target_tensor[:, :-1]], dim=1) # (Batch, 8)
+
+# 学習開始
 print("--- 学習開始 ---")
 
-for epoch in range (config.epochs):
-    # 順伝播。系列
-    # attention, input_vectors = model(input_tensor)
-    # 順伝播。2値分類
-    logits, _ = model(input_tensor)
-
-    # 2値分類では不要
-    # target_vectors = model.embedding_layer(target_tensor).detach()
-
-    # 損失計算。系列
-    # loss = criterion(attention, target_vectors)
-    # 損失計算。2値分類
-    loss = criterion(logits, target_tensor)
-
+for epoch in range(config.epochs):
+    model.train()
+    
+    # 順伝播
+    logits = model(input_tensor, decoder_input)  # (Batch, 8, num_embeddings)
+    
+    # 損失計算 (Batch * 8, num_embeddings) と (Batch * 8) に平坦化して計算する
+    loss = criterion(logits.view(-1, dataset.num_embeddings), target_tensor.view(-1))
+    
     # 誤差逆伝播
-    optimizer.zero_grad() # 勾配の初期化
-    loss.backward() # 誤差逆伝播。どう動かせばいいか学習する
-    optimizer.step() # 重みの更新。backwardで計算した結果をもとに実際に更新する
-
-    # 10エポックごとに損失を表示
-    if (epoch + 1) % 10 == 0:
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    
+    # 50エポックごとに損失を表示
+    if (epoch + 1) % 50 == 0:
         print(f"Epoch {epoch+1:3d}/{config.epochs} | Loss: {loss.item():.6f}")
 
-# === 単語を予測
-model.eval() # 単語を予測モードに
-with torch.no_grad(): # withは、自動で後処理を実行してくれる文。
-    # 系列
-    # attention, _ = model(input_tensor) # attentionだけ取り出せればいい
-    # 2値
-    logits, _ = model(input_tensor)
-
-    # 系列での予測
-    # distances = torch.cdist(attention, model.embedding_layer.weight) # attentionの出力と単語ベクトルを照らし合わせ、全部の距離を計算している。
-    # predicted_ids = torch.argmin(distances, dim=-1)
-    # 2値
-    probs = torch.sigmoid(logits)
-    predicted_ids = (probs >= 0.5).long()
-
-# 結果を表示。系列
-"""
-print("\n--- 学習後の予測結果 (前半15件) ---")
-for i in range(100):
-    num = dataset.numbers[i]
-    orig_word = dataset.outputs[i]
-    pred_chars = [dataset.id_to_char[idx.item()] for idx in predicted_ids[i]]
-    pred_word = "".join(pred_chars).strip()
-    print(f"Num: {num} | 元の単語: {orig_word:4s} -> 予測された単語: {pred_word}")
-"""
- 
-# 結果を表示 2値
-print("\n--- 学習後の予測結果 (前半15件) ---")
-for i in range(1000):
-    num = dataset.numbers[i]  # 元の数字 (文字列)
-    orig_label = int(dataset.outputs[i])  # 正解ラベル (0 または 1)
-    pred_label = predicted_ids[i].item()  # 予測ラベル (0 または 1)
-    
-    # 1のときは "Aho"、0のときは元の数字を表示用にする
-    orig_display = "Aho" if orig_label == 1 else num
-    pred_display = "Aho" if pred_label == 1 else num
-    
-    print(f"Num: {num:>3s} | 正解: {orig_display:4s} -> 予測: {pred_display}")
-
-
-
-# ==========================================
-# === 未知のデータ (101〜150) でのテスト推論
-# ==========================================
-
-test_numbers = list(range(2001, 3000))  # 学習時に見せていないデータ
-
-# 1. 追加した関数でテストデータをテンソルに変換
-test_input_tensor = dataset.encode_numbers(test_numbers)
-
-# 2. モデルを評価モードにして推論を実行
+# === 単語を予測 (自己回帰生成)
 model.eval()
-with torch.no_grad():
-    logits, _ = model(test_input_tensor)
-    probs = torch.sigmoid(logits)
-    predicted_labels = (probs >= 0.5).long()
 
-# 3. テストデータの正解ラベル (0 or 1) をプログラム側で計算しておく
-test_targets = []
+def generate_sequences(src_tensor):
+    """
+    自己回帰（Autoregressive）で1文字ずつ生成する
+    src_tensor: (Batch, 8)
+    """
+    eval_batch_size = src_tensor.size(0)
+    # 開始トークンのみで初期化 (長さ1)
+    tgt_eval = torch.full((eval_batch_size, 1), sos_id, dtype=torch.long, device=device)
+    
+    with torch.no_grad():
+        # エンコーダの出力を一回だけ計算して保持
+        src_embedded = model.embedding(src_tensor)
+        src_pos = model.pos_encoder(src_embedded)
+        encoder_outputs = model.encoder(src_pos)
+        
+        # 8回ループして、合計9文字 (開始トークン + 8文字の生成結果) にする
+        for _ in range(config.num_digits):
+            tgt_embedded = model.embedding(tgt_eval)
+            tgt_pos = model.pos_encoder(tgt_embedded)
+            decoder_outputs = model.decoder(tgt_pos, encoder_outputs)
+            logits = model.output_linear(decoder_outputs)  # (Batch, current_len, num_embeddings)
+            
+            # 最後の時間ステップの予測値を取得
+            next_tokens = logits[:, -1, :].argmax(dim=-1, keepdim=True)  # (Batch, 1)
+            # 生成結果を結合
+            tgt_eval = torch.cat([tgt_eval, next_tokens], dim=1)
+            
+    return tgt_eval
+
+# 訓練データでの予測とデコード
+predicted_ids = generate_sequences(input_tensor)
+
+# 結果を表示
+print("\n--- 学習後の予測結果 (前半15件) ---")
+for i in range(15):
+    num = dataset.numbers[i]
+    orig_label_raw = dataset.outputs[i] # "0" または "1"
+    
+    # 生成されたIDリストを文字に変換 (インデックス0の開始トークンはスキップ)
+    pred_chars = [dataset.id_to_char[idx.item()] for idx in predicted_ids[i][1:]]
+    pred_label_raw = "".join(pred_chars).strip() # "0" または "1"
+    
+    # 表示用に整形 (1ならAho、0なら元の数字)
+    orig_display = "Aho" if orig_label_raw == "1" else num
+    pred_display = "Aho" if pred_label_raw == "1" else num
+    
+    status = "◯" if orig_label_raw == pred_label_raw else "×"
+    print(f"Num: {num:>3s} | 正解: {orig_display:4s} -> 予測: {pred_display:4s} | {status}")
+
+
+# ==========================================
+# === 未知のデータ (2001〜2100) でのテスト推論
+# ==========================================
+test_numbers = list(range(2001, 2100))
+
+# 1. テストデータをテンソルに変換
+test_input_tensor = dataset.encode_numbers(test_numbers).to(device)
+
+# 2. 推論実行
+test_predicted_ids = generate_sequences(test_input_tensor)
+
+# 3. テストデータの正解ラベル ("0" または "1") を作成
+test_targets_raw = []
 for n in test_numbers:
     is_multiple_of_3 = (n % 3 == 0)
     contains_3 = ('3' in str(n))
-    test_targets.append(1 if (is_multiple_of_3 or contains_3) else 0)
+    test_targets_raw.append("1" if (is_multiple_of_3 or contains_3) else "0")
 
 # 4. 結果の表示と正答率の計算
-print("\n--- 未知のデータ (101〜150) での予測結果 ---")
+print("\n--- 未知のデータ (2001〜2100) での予測結果 (前半15件) ---")
 correct_count = 0
 
 for i, num in enumerate(test_numbers):
-    orig_label = test_targets[i]
-    pred_label = predicted_labels[i].item()
+    orig_label_raw = test_targets_raw[i]
     
-    # 1のときは "Aho"、0のときは元の数字を表示用に整形
-    orig_display = "Aho" if orig_label == 1 else str(num)
-    pred_display = "Aho" if pred_label == 1 else str(num)
+    # 生成結果からデコード (インデックス0はスキップ)
+    pred_chars = [dataset.id_to_char[idx.item()] for idx in test_predicted_ids[i][1:]]
+    pred_label_raw = "".join(pred_chars).strip()
+    
+    # 表示用に整形
+    orig_display = "Aho" if orig_label_raw == "1" else str(num)
+    pred_display = "Aho" if pred_label_raw == "1" else str(num)
     
     # 正解・不正解のマーク判定
-    status = "◯" if orig_label == pred_label else "×"
-    if orig_label == pred_label:
+    status = "◯" if orig_label_raw == pred_label_raw else "×"
+    if orig_label_raw == pred_label_raw:
         correct_count += 1
         
-    print(f"Num: {num:>3d} | 正解: {orig_display:4s} -> 予測: {pred_display:4s} | {status}")
+    if i < 15:
+        print(f"Num: {num:>3d} | 正解: {orig_display:4s} -> 予測: {pred_display:4s} | {status}")
 
 # 全体の正答率を表示
 accuracy = (correct_count / len(test_numbers)) * 100

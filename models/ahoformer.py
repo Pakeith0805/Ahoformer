@@ -1,41 +1,48 @@
 # パーツを組み立てるよ
 # config: d_model, d_k
-# input: num_embeddings(単語の種類), 単語idの並びx
-# output: attentionベクトル, 素の単語ベクトル
+# input: num_embeddings(単語の種類), 単語idの並びsrc, tgt
+# output: logits
 
+import torch
 import torch.nn as nn
 import config
-from .layers import SelfAttention
-from .layers import FFN
+from .layers import Encoder  # models/layers/encoder_layer.py から (1層エンコーダ)
+from .layers import Decoder  # models/layers/decoder_layer.py から (1層デコーダ)
 from .layers import PositionalEncoding
-from .layers import Encoder
 
-class Ahoformer(nn.Module): # modelを呼び出すと、initで定義してforwardで実行までを自動でやってくれる。
+class Ahoformer(nn.Module):
     def __init__(self, num_embeddings):
         super().__init__()
-        # 埋め込み層
-        self.embedding_layer = nn.Embedding(num_embeddings, config.d_model)
+        # エンコーダとデコーダで共有する単語埋め込み層
+        self.embedding = nn.Embedding(num_embeddings, config.d_model)
 
-         # 位置エンコーディング層を初期化する
-        self.pos_encoder = PositionalEncoding(config.d_model, config.num_digits)
+        # 位置エンコーディング層を初期化する
+        self.pos_encoder = PositionalEncoding(config.d_model, max_len=config.num_digits)
         
-        # encoderのまとまり
+        # 1層のエンコーダブロック
         self.encoder = Encoder()
+
+        # 1層のデコーダブロック
+        self.decoder = Decoder()
         
-        # 8文字を2値に分類するFFN
-        self.classifier = nn.Linear(config.num_digits * config.d_model, 1)
+        # 最終的に文字の予測ID（ボキャブラリ）の確率分布を出すための線形層
+        self.output_linear = nn.Linear(config.d_model, num_embeddings)
 
-    def forward(self, x): # 学習のさい、input側だからinput_vectors
-        input_vectors = self.embedding_layer(x)
-
-        # 埋め込みベクトルの直後に、位置情報を加算する
-        pos_vectors = self.pos_encoder(input_vectors)
-
-        # encoderに通す
-        out = self.encoder(pos_vectors)
+    def forward(self, src, tgt):
+        # src: 入力の数字ID系列 (Batch, SeqLen_src)
+        # tgt: ターゲット文字ID系列 (Batch, SeqLen_tgt)
         
-        # フラット化して全結合層に入力し、ロジット (logits) を計算
-        flat_out = out.view(out.size(0), -1)  # 形状: (Batch, 8 * d_model)
-        logits = self.classifier(flat_out)  # 形状: (Batch, 1)
-
-        return logits, input_vectors
+        # 1. エンコーダ処理
+        src_embedded = self.embedding(src)
+        src_pos = self.pos_encoder(src_embedded)
+        encoder_outputs = self.encoder(src_pos)  # (Batch, SeqLen_src, d_model)
+        
+        # 2. デコーダ処理 (エンコーダの出力をクロスアテンションで参照)
+        tgt_embedded = self.embedding(tgt)
+        tgt_pos = self.pos_encoder(tgt_embedded)
+        decoder_outputs = self.decoder(tgt_pos, encoder_outputs)  # (Batch, SeqLen_tgt, d_model)
+        
+        # 3. 最終出力 (各文字位置におけるボキャブラリのロジット)
+        logits = self.output_linear(decoder_outputs)  # (Batch, SeqLen_tgt, num_embeddings)
+        
+        return logits

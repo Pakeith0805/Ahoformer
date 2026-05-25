@@ -28,10 +28,13 @@ class CrossAttention(nn.Module):
         K = self.w_k(encoder_outputs)
         V = self.w_v(encoder_outputs)
 
+        batch_size = x.size(0)
+        seq_len_k = encoder_outputs.size(1)
+
         # マルチヘッドにする。ヘッドを分割。
-        Q_multi = Q.view(-1, seq_len_q, config.num_head, config.d_k) # バッチサイズ分からんし-1
-        K_multi = K.view(-1, config.num_digits, config.num_head, config.d_k) # バッチサイズ分からんし-1
-        V_multi = V.view(-1, config.num_digits, config.num_head, config.d_k) # バッチサイズ分からんし-1
+        Q_multi = Q.view(batch_size, seq_len_q, config.num_head, config.d_k)
+        K_multi = K.view(batch_size, seq_len_k, config.num_head, config.d_k)
+        V_multi = V.view(batch_size, seq_len_k, config.num_head, config.d_k)
 
         # 行列計算する部分を最後に持ってきたいので入れ替え
         Q_multi = Q_multi.transpose(1, 2)
@@ -46,7 +49,7 @@ class CrossAttention(nn.Module):
 
         # くっつけたいので次元戻す
         attention = attention.transpose(1, 2)
-        attention = attention.reshape(-1, config.num_digits, config.d_model)
+        attention = attention.reshape(batch_size, seq_len_q, config.d_model)
 
         attention = self.w_o(attention)
 
