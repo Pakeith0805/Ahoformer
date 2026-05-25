@@ -21,6 +21,8 @@ class Ahoformer(nn.Module): # modelを呼び出すと、initで定義してforwa
         # self-attention
         self.attention = SelfAttention(config.d_model, config.d_k)
 
+        self.layernorm = nn.LayerNorm(normalized_shape = config.d_model)
+
         # 普通のffn
         self.ffn = FFN(config.d_model, config.d_ff)
         
@@ -34,7 +36,10 @@ class Ahoformer(nn.Module): # modelを呼び出すと、initで定義してforwa
         pos_vectors = self.pos_encoder(input_vectors)
 
         out = self.attention(pos_vectors)
+        out = self.layernorm(out)
+
         out = self.ffn(out)
+        out = self.layernorm(out)
         
         # フラット化して全結合層に入力し、ロジット (logits) を計算
         flat_out = out.view(out.size(0), -1)  # 形状: (Batch, 8 * d_model)
