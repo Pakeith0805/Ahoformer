@@ -2,22 +2,23 @@ import torch
 import torch.nn as nn # embeddingに使う
 import torch.optim as optim # optimizerを使う
 import config
-import dataset
+import dataset_decoder
 from models import AhoformerDecoder
 
 # モデルと損失関数の作成
-model = AhoformerDecoder(dataset.num_embeddings) # num_embeddingsは単語の種類数。
+model = AhoformerDecoder(dataset_decoder.num_embeddings) # num_embeddingsは単語の種類数。
 # 系列変換モデル用
 # criterion = nn.MSELoss() # 損失関数。これは平均二乗誤差
+criterion = nn.CrossEntropyLoss()
 # 2値分類用
-criterion = nn.BCEWithLogitsLoss()
+# criterion = nn.BCEWithLogitsLoss()
 
 # === 学習の設定
 optimizer = optim.Adam(model.parameters(), lr=config.lr)
 
 # === 訓練データ
-input_tensor = dataset.input_tensor
-target_tensor = dataset.target_tensor_bin
+input_tensor = dataset_decoder.input_tensor
+target_tensor = dataset_decoder.target_tensor_bin
 
 # === 学習開始
 print("--- 学習開始 ---")
@@ -26,7 +27,9 @@ for epoch in range (config.epochs):
     # 順伝播。系列
     # attention, input_vectors = model(input_tensor)
     # 順伝播。2値分類
-    logits, _ = model(input_tensor)
+    logits = model(input_tensor)
+
+    logits_at_mask = logits[:, -1, :] # 形状: (Batch, num_embeddings)
 
     # 2値分類では不要
     # target_vectors = model.embedding_layer(target_tensor).detach()
@@ -34,7 +37,7 @@ for epoch in range (config.epochs):
     # 損失計算。系列
     # loss = criterion(attention, target_vectors)
     # 損失計算。2値分類
-    loss = criterion(logits, target_tensor)
+    loss = criterion(logits_at_mask, target_tensor)
 
     # 誤差逆伝播
     optimizer.zero_grad() # 勾配の初期化
@@ -51,14 +54,14 @@ with torch.no_grad(): # withは、自動で後処理を実行してくれる文�
     # 系列
     # attention, _ = model(input_tensor) # attentionだけ取り出せればいい
     # 2値
-    logits, _ = model(input_tensor)
+    logits = model(input_tensor)
 
     # 系列での予測
     # distances = torch.cdist(attention, model.embedding_layer.weight) # attentionの出力と単語ベクトルを照らし合わせ、全部の距離を計算している。
     # predicted_ids = torch.argmin(distances, dim=-1)
     # 2値
-    probs = torch.sigmoid(logits)
-    predicted_ids = (probs >= 0.5).long()
+    logits_at_mask = logits[:, -1, :]             # ★右端の [MASK] 位置を取り出す
+    predicted_ids = logits_at_mask.argmax(dim=-1)  # ★最も確率の高いIDを取得 (Batch,) の形になる
 
 # 結果を表示。系列
 """
@@ -74,59 +77,60 @@ for i in range(100):
 # 結果を表示 2値
 print("\n--- 学習後の予測結果 (前半15件) ---")
 for i in range(1000):
-    num = dataset.numbers[i]  # 元の数字 (文字列)
-    orig_label = int(dataset.outputs[i])  # 正解ラベル (0 または 1)
+    num = dataset_decoder.numbers[i]  # 元の数字 (文字列)
+    orig_label = target_tensor[i].item()
     pred_label = predicted_ids[i].item()  # 予測ラベル (0 または 1)
     
     # 1のときは "Aho"、0のときは元の数字を表示用にする
-    orig_display = "Aho" if orig_label == 1 else num
-    pred_display = "Aho" if pred_label == 1 else num
-    
-    print(f"Num: {num:>3s} | 正解: {orig_display:4s} -> 予測: {pred_display}")
+    orig_display = "Aho" if orig_label == dataset_decoder.char_to_id['1'] else num
+    pred_display = "Aho" if pred_label == dataset_decoder.char_to_id['1'] else num
+    status = "◯" if orig_label == pred_label else "×"
+    print(f"Num: {num:>3s} | 正解: {orig_display:4s} -> 予測: {pred_display} | {status}")
 
 
 
 # ==========================================
-# === 未知のデータ (101〜150) でのテスト推論
+# === 未知のデータ (2001〜3000) でのテスト推論
 # ==========================================
-
 test_numbers = list(range(2001, 3000))  # 学習時に見せていないデータ
 
 # 1. 追加した関数でテストデータをテンソルに変換
-test_input_tensor = dataset.encode_numbers(test_numbers)
+test_input_tensor = dataset_decoder.encode_numbers(test_numbers)
 
 # 2. モデルを評価モードにして推論を実行
 model.eval()
 with torch.no_grad():
-    logits, _ = model(test_input_tensor)
-    probs = torch.sigmoid(logits)
-    predicted_labels = (probs >= 0.5).long()
+    logits = model(test_input_tensor) # 104行目: test_input_tensor を渡す
+    logits_at_mask = logits[:, -1, :]
+    predicted_ids = logits_at_mask.argmax(dim=-1)
 
-# 3. テストデータの正解ラベル (0 or 1) をプログラム側で計算しておく
+# 3. テストデータの正解ラベル ('1'のID または '0'のID) を準備
+# (修正点: 数値の 0, 1 ではなく、辞書上の文字IDを登録します)
 test_targets = []
 for n in test_numbers:
     is_multiple_of_3 = (n % 3 == 0)
     contains_3 = ('3' in str(n))
-    test_targets.append(1 if (is_multiple_of_3 or contains_3) else 0)
+    label_char = '1' if (is_multiple_of_3 or contains_3) else '0'
+    test_targets.append(dataset_decoder.char_to_id[label_char])
 
 # 4. 結果の表示と正答率の計算
-print("\n--- 未知のデータ (101〜150) での予測結果 ---")
+print("\n--- 未知のデータ (2001〜3000) での予測結果 (前半15件) ---")
 correct_count = 0
 
 for i, num in enumerate(test_numbers):
-    orig_label = test_targets[i]
-    pred_label = predicted_labels[i].item()
+    orig_label_id = test_targets[i]
+    pred_label_id = predicted_ids[i].item() # テストデータの予測ID
     
-    # 1のときは "Aho"、0のときは元の数字を表示用に整形
-    orig_display = "Aho" if orig_label == 1 else str(num)
-    pred_display = "Aho" if pred_label == 1 else str(num)
+    # '1' のIDなら Aho、それ以外は数字そのものを表示
+    orig_display = "Aho" if orig_label_id == dataset_decoder.char_to_id['1'] else str(num)
+    pred_display = "Aho" if pred_label_id == dataset_decoder.char_to_id['1'] else str(num)
     
-    # 正解・不正解のマーク判定
-    status = "◯" if orig_label == pred_label else "×"
-    if orig_label == pred_label:
+    status = "◯" if orig_label_id == pred_label_id else "×"
+    if orig_label_id == pred_label_id:
         correct_count += 1
         
-    print(f"Num: {num:>3d} | 正解: {orig_display:4s} -> 予測: {pred_display:4s} | {status}")
+    if i < 15: # 前半15件のみコンソール表示
+        print(f"Num: {num:>3d} | 正解: {orig_display:4s} -> 予測: {pred_display:4s} | {status}")
 
 # 全体の正答率を表示
 accuracy = (correct_count / len(test_numbers)) * 100
