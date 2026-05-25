@@ -10,7 +10,7 @@ from .layers import FFN
 from .layers import PositionalEncoding
 from .layers import Encoder
 
-class Ahoformer(nn.Module): # modelを呼び出すと、initで定義してforwardで実行までを自動でやってくれる。
+class AhoformerEncoder(nn.Module): # modelを呼び出すと、initで定義してforwardで実行までを自動でやってくれる。
     def __init__(self, num_embeddings):
         super().__init__()
         # 埋め込み層

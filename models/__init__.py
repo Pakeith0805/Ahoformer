@@ -1,3 +1,4 @@
 # Ahoformerを普通に使えるように
 
-from .ahoformer import Ahoformer
+from .encoder_classifier import AhoformerEncoder
+from .decoder_classifier import AhoformerDecoder

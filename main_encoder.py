@@ -3,10 +3,10 @@ import torch.nn as nn # embeddingに使う
 import torch.optim as optim # optimizerを使う
 import config
 import dataset
-from models import Ahoformer
+from models import AhoformerEncoder
 
 # モデルと損失関数の作成
-model = Ahoformer(dataset.num_embeddings) # num_embeddingsは単語の種類数。
+model = AhoformerEncoder(dataset.num_embeddings) # num_embeddingsは単語の種類数。
 # 系列変換モデル用
 # criterion = nn.MSELoss() # 損失関数。これは平均二乗誤差
 # 2値分類用

@@ -5,4 +5,4 @@ from .casual_attention import CasualAttention
 from .cross_attention import CrossAttention
 from .ffn import FFN
 from .positional import PositionalEncoding
-from .encoder import Encoder
+from .encoder_layer import Encoder
