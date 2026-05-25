@@ -10,7 +10,7 @@ import config
 import math
 
 class CrossAttention(nn.Module):
-    def __init__(self, d_model, d_k):
+    def __init__(self, d_model):
         super().__init__()
         self.w_q = nn.Linear(d_model, d_model, bias=False) # 入力×出力
         self.w_k = nn.Linear(d_model, d_model, bias=False)
