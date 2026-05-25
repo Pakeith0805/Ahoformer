@@ -2,8 +2,8 @@
 
 import torch.nn as nn
 import config
-from layers import SelfAttention
-from layers import FFN
+from .self_attention import SelfAttention
+from .ffn import FFN
 
 class Encoder(nn.Module):
     def __init__(self):

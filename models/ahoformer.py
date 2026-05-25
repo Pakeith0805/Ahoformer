@@ -8,6 +8,7 @@ import config
 from .layers import SelfAttention
 from .layers import FFN
 from .layers import PositionalEncoding
+from .layers import Encoder
 
 class Ahoformer(nn.Module): # modelを呼び出すと、initで定義してforwardで実行までを自動でやってくれる。
     def __init__(self, num_embeddings):
@@ -18,15 +19,8 @@ class Ahoformer(nn.Module): # modelを呼び出すと、initで定義してforwa
          # 位置エンコーディング層を初期化する
         self.pos_encoder = PositionalEncoding(config.d_model, config.num_digits)
         
-        # self-attention
-        self.attention = SelfAttention(config.d_model, config.d_k)
-
-        # 層正規化
-        self.layernorm1 = nn.LayerNorm(normalized_shape = config.d_model)
-        self.layernorm2 = nn.LayerNorm(normalized_shape = config.d_model)
-
-        # 普通のffn
-        self.ffn = FFN(config.d_model, config.d_ff)
+        # encoderのまとまり
+        self.encoder = Encoder()
         
         # 8文字を2値に分類するFFN
         self.classifier = nn.Linear(config.num_digits * config.d_model, 1)
@@ -37,13 +31,8 @@ class Ahoformer(nn.Module): # modelを呼び出すと、initで定義してforwa
         # 埋め込みベクトルの直後に、位置情報を加算する
         pos_vectors = self.pos_encoder(input_vectors)
 
-        # 残差接続
-        out = pos_vectors + self.attention(pos_vectors)
-        out = self.layernorm1(out)
-
-        # 残差接続
-        out = out + self.ffn(out)
-        out = self.layernorm2(out)
+        # encoderに通す
+        out = self.encoder(pos_vectors)
         
         # フラット化して全結合層に入力し、ロジット (logits) を計算
         flat_out = out.view(out.size(0), -1)  # 形状: (Batch, 8 * d_model)
