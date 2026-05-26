@@ -2,15 +2,15 @@
 
 import torch.nn as nn
 import config
-from .casual_attention import CasualAttention
+from .causal_attention import CausalAttention
 from .cross_attention import CrossAttention
 from .ffn import FFN
 
 class Decoder(nn.Module):
     def __init__(self):
         super().__init__()
-        # casual-attention
-        self.casual_attention = CasualAttention(config.d_model)
+        # causal-attention
+        self.causal_attention = CausalAttention(config.d_model)
 
         # cross-attention
         self.cross_attention = CrossAttention(config.d_model)
@@ -24,8 +24,8 @@ class Decoder(nn.Module):
         self.ffn = FFN(config.d_model, config.d_ff)
 
     def forward(self, x):# , encoder_outputs): # 位置エンコーディングまで終わったテンソルと、encoderを通り抜けたテンソルを受け取る
-        # casual-attention
-        out = x + self.casual_attention(x)
+        # causal-attention
+        out = x + self.causal_attention(x)
         out = self.layernorm1(out)
 
         # cross-attention

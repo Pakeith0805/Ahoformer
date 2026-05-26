@@ -98,3 +98,4 @@
 - nn.moduleの仕様。initに何を書いてforwardに何を書くのか
 - nn.moduleにおいて、インスタンスを作るときは__init__に渡す引数を渡して、そのインスタンスで何かを実行するときにはforwardに渡す引数を渡すことに気が付くのに時間がかかった。
 - 次のpythonの仕様がわからなかった。重みを定義するとき、self.w_q = nn.Linear(d_model, d_k, bias=False)と書くと、内部的には(d_k, d_model)って形の行列ができる。しかし、実際に計算するとき、self.w_q(x)と書くと、x×(w_qの転置)の計算が行われるため、結局、x×(d_model, d_k)の計算が行われていることになる。
+- decoderの仕様がわからなかった。どうやってahotransformerをdecoderd使えるようにするのか
