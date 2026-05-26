@@ -37,7 +37,7 @@ for epoch in range(config.epochs):
         print(f"Epoch {epoch+1:3d}/{config.epochs} | Loss: {loss.item():.6f}")
 
 
-# === 自己回帰生成関数の定義
+# === 自己回帰生成関数の定義。これは推論時のみ使われる。純粋に検証用
 def generate_autoregressive(model, number, char_to_id, id_to_char, max_len=12):
     model.eval()
     with torch.no_grad():

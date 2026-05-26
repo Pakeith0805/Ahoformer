@@ -53,7 +53,7 @@ for num, out in zip(numbers, outputs):
     if padding_len > 0:
         seq = seq + [' '] * padding_len
     
-    # インプットのID化
+    # インプットのID化。辞書を参照してidをとってくる
     row_ids = [char_to_id[char] for char in seq]
     input_ids.append(row_ids)
     
