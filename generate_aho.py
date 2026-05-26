@@ -12,7 +12,7 @@ with open(file_name, mode="w", encoding="utf-8-sig", newline="") as f:
     writer.writeheader()
     
     # 3. ループを回しながら1行ずつ書き込む
-    for i in range(1, 101):
+    for i in range(1, 1001):
         is_multiple_of_3 = (i % 3 == 0)
         contains_3 = ('3' in str(i))
         

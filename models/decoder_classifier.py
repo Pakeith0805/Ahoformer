@@ -17,7 +17,7 @@ class AhoformerDecoder(nn.Module): # modelを呼び出すと、initで定義し�
         self.embedding_layer = nn.Embedding(num_embeddings, config.d_model)
 
          # 位置エンコーディング層を初期化する
-        self.pos_encoder = PositionalEncoding(config.d_model, config.num_digits)
+        self.pos_encoder = PositionalEncoding(config.d_model, 128)
         
         # decoderのまとまり
         self.decoder = Decoder()

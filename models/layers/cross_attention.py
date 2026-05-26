@@ -22,6 +22,7 @@ class CrossAttention(nn.Module):
     def forward(self, x, encoder_outputs): # xはデコーダ側の入力
 
         seq_len_q = x.size(1)          # デコーダ側の長さ（例: 生成中の文字数）
+        seq_len_kv = encoder_outputs.size(1) # エンコーダ側の長さ
 
         # x: embedded_vectors (Batch, SeqLen, d_model)
         Q = self.w_q(x)
@@ -30,8 +31,8 @@ class CrossAttention(nn.Module):
 
         # マルチヘッドにする。ヘッドを分割。
         Q_multi = Q.view(-1, seq_len_q, config.num_head, config.d_k) # バッチサイズ分からんし-1
-        K_multi = K.view(-1, config.num_digits, config.num_head, config.d_k) # バッチサイズ分からんし-1
-        V_multi = V.view(-1, config.num_digits, config.num_head, config.d_k) # バッチサイズ分からんし-1
+        K_multi = K.view(-1, seq_len_kv, config.num_head, config.d_k) # バッチサイズ分からんし-1
+        V_multi = V.view(-1, seq_len_kv, config.num_head, config.d_k) # バッチサイズ分からんし-1
 
         # 行列計算する部分を最後に持ってきたいので入れ替え
         Q_multi = Q_multi.transpose(1, 2)
@@ -46,7 +47,7 @@ class CrossAttention(nn.Module):
 
         # くっつけたいので次元戻す
         attention = attention.transpose(1, 2)
-        attention = attention.reshape(-1, config.num_digits, config.d_model)
+        attention = attention.reshape(-1, seq_len_q, config.d_model)
 
         attention = self.w_o(attention)
 

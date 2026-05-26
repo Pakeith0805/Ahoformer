@@ -18,15 +18,15 @@ with open(csv_file, mode="r", encoding="utf-8-sig") as f:
 numbers_split = [list(f"{word:>{config.num_digits}}") for word in numbers]
 outputs_split = [list(f"{word:>{config.num_digits}}") for word in outputs]
 
-# ユニークな文字を抽出。0～9とAhoになるはず。(系列)
-# 2値分類なら数字になる。あと空白
+# ユニークな文字を抽出。
 all_chars = set()
 for seq in numbers_split + outputs_split:
     for char in seq:
         all_chars.add(char)
+
 # decoder追加要素
 all_chars.add('[SEP]')
-all_chars.add('[MASK]')
+all_chars.add('[EOS]')
 
 # idと文字の対応付け
 unique_chars = sorted(list(all_chars))
@@ -35,42 +35,55 @@ id_to_char = {idx: char for char, idx in char_to_id.items()}
 
 num_embeddings = len(char_to_id)  # 単語の種類数（行数）
 
-# === テキストをidに変換し、tensorにする
-input_ids = [] # 右詰めのリストをidに変換している
+max_seq_len = 12
 
-# === decoderで追加
-for word in numbers:
-    # 特殊トークン2つ分のスペースを空けるため、(config.num_digits - 2) 桁で右詰め
-    padded_word = f"{word:>{config.num_digits - 2}}"
-    # 末尾に [SEP] と [MASK] を結合
-    seq = list(padded_word) + ['[SEP]', '[MASK]']
+# === テキストをidに変換し、tensorにする
+input_ids = []
+target_ids = []
+
+for num, out in zip(numbers, outputs):
+    # プロンプト部: 5文字の右詰め + [SEP] (長さ 6)
+    prompt = list(f"{num:>5}") + ['[SEP]']
+    # 応答部: 出力文字列 + [EOS]
+    response = list(out) + ['[EOS]']
+    
+    # 結合して固定長にパディング
+    seq = prompt + response
+    padding_len = max_seq_len - len(seq)
+    if padding_len > 0:
+        seq = seq + [' '] * padding_len
+    
+    # インプットのID化
     row_ids = [char_to_id[char] for char in seq]
     input_ids.append(row_ids)
+    
+    # ターゲットのID化 (Causal LM用: 次トークン予測、プロンプト/パディングは -100 にマスク)
+    row_targets = []
+    for i in range(max_seq_len - 1):
+        if i < 5:  # プロンプト予測位置はマスク (i=4 は [SEP] 予測)
+            row_targets.append(-100)
+        else:
+            target_char = seq[i + 1]
+            if target_char == ' ':  # パディング部分はマスク
+                row_targets.append(-100)
+            else:
+                row_targets.append(char_to_id[target_char])
+    row_targets.append(-100)  # 末尾の次の予測はマスク
+    target_ids.append(row_targets)
 
-input_tensor = torch.tensor(input_ids, dtype=torch.long)  # それをテンソルにしている。形状: (単語数, 8)
-
-# 系列を出力する場合のtarget tensor
-target_ids_seq = [[char_to_id[char] for char in seq] for seq in outputs_split]
-target_tensor_seq = torch.tensor(target_ids_seq, dtype=torch.long)  # 形状: (単語数, 8)
-
-# 2値分類の場合のtarget tensor (CrossEntropy用にするため、'0' または '1' の文字IDに変更)
-target_ids_bin = [char_to_id[word] for word in outputs] # outputs は "0" または "1"
-target_tensor_bin = torch.tensor(target_ids_bin, dtype=torch.long) # 形状: (単語数,)
+input_tensor = torch.tensor(input_ids, dtype=torch.long)  # 形状: (単語数, max_seq_len)
+target_tensor = torch.tensor(target_ids, dtype=torch.long)  # 形状: (単語数, max_seq_len)
 
 
-# === 未知データの変換関数の修正（推論テスト用）
-def encode_numbers(number_list, max_len=config.num_digits):
+# === 未知データの変換関数（プロンプト生成用）
+def encode_numbers(number_list):
     """
-    任意の数字リストをデコーダ入力用のテンソルに変換する（末尾に[SEP],[MASK]）
+    任意の数字リストをデコーダ入力用のプロンプトテンソルに変換する（[SEP]まで）
     """
     input_ids = []
     for num in number_list:
-        padded_word = f"{str(num):>{max_len - 2}}"
-        seq = list(padded_word) + ['[SEP]', '[MASK]']
-        
-        row_ids = []
-        for char in seq:
-            row_ids.append(char_to_id.get(char, char_to_id[' ']))
+        prompt = list(f"{num:>5}") + ['[SEP]']
+        row_ids = [char_to_id.get(char, char_to_id[' ']) for char in prompt]
         input_ids.append(row_ids)
         
     return torch.tensor(input_ids, dtype=torch.long)

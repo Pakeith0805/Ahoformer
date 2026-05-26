@@ -21,14 +21,15 @@ class SelfAttention(nn.Module):
 
     def forward(self, x):
         # x: embedded_vectors (Batch, SeqLen, d_model)
+        seq_len = x.size(1)
         Q = self.w_q(x)
         K = self.w_k(x)
         V = self.w_v(x)
 
         # マルチヘッドにする。ヘッドを分割。
-        Q_multi = Q.view(-1, config.num_digits, config.num_head, config.d_k) # バッチサイズ分からんし-1
-        K_multi = K.view(-1, config.num_digits, config.num_head, config.d_k) # バッチサイズ分からんし-1
-        V_multi = V.view(-1, config.num_digits, config.num_head, config.d_k) # バッチサイズ分からんし-1
+        Q_multi = Q.view(-1, seq_len, config.num_head, config.d_k) # バッチサイズ分からんし-1
+        K_multi = K.view(-1, seq_len, config.num_head, config.d_k) # バッチサイズ分からんし-1
+        V_multi = V.view(-1, seq_len, config.num_head, config.d_k) # バッチサイズ分からんし-1
 
         # 行列計算する部分を最後に持ってきたいので入れ替え
         Q_multi = Q_multi.transpose(1, 2)
@@ -43,7 +44,7 @@ class SelfAttention(nn.Module):
 
         # くっつけたいので次元戻す
         attention = attention.transpose(1, 2)
-        attention = attention.reshape(-1, config.num_digits, config.d_model)
+        attention = attention.reshape(-1, seq_len, config.d_model)
 
         attention = self.w_o(attention)
 

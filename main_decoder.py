@@ -1,137 +1,139 @@
 import torch
-import torch.nn as nn # embeddingに使う
-import torch.optim as optim # optimizerを使う
+import torch.nn as nn
+import torch.optim as optim
 import config
 import dataset_decoder
 from models import AhoformerDecoder
 
 # モデルと損失関数の作成
-model = AhoformerDecoder(dataset_decoder.num_embeddings) # num_embeddingsは単語の種類数。
-# 系列変換モデル用
-# criterion = nn.MSELoss() # 損失関数。これは平均二乗誤差
-criterion = nn.CrossEntropyLoss()
-# 2値分類用
-# criterion = nn.BCEWithLogitsLoss()
+model = AhoformerDecoder(dataset_decoder.num_embeddings)
+criterion = nn.CrossEntropyLoss(ignore_index=-100)  # マスクされたトークン(-100)を無視する
 
 # === 学習の設定
 optimizer = optim.Adam(model.parameters(), lr=config.lr)
 
 # === 訓練データ
-input_tensor = dataset_decoder.input_tensor
-target_tensor = dataset_decoder.target_tensor_bin
+input_tensor = dataset_decoder.input_tensor     # 形状: (Batch, max_seq_len)
+target_tensor = dataset_decoder.target_tensor   # 形状: (Batch, max_seq_len)
 
 # === 学習開始
 print("--- 学習開始 ---")
 
-for epoch in range (config.epochs):
-    # 順伝播。系列
-    # attention, input_vectors = model(input_tensor)
-    # 順伝播。2値分類
-    logits = model(input_tensor)
+for epoch in range(config.epochs):
+    model.train()
+    # 順伝播
+    logits = model(input_tensor)  # 形状: (Batch, max_seq_len, num_embeddings)
 
-    logits_at_mask = logits[:, -1, :] # 形状: (Batch, num_embeddings)
-
-    # 2値分類では不要
-    # target_vectors = model.embedding_layer(target_tensor).detach()
-
-    # 損失計算。系列
-    # loss = criterion(attention, target_vectors)
-    # 損失計算。2値分類
-    loss = criterion(logits_at_mask, target_tensor)
+    # 損失計算 (Batch*max_seq_len, num_embeddings) と (Batch*max_seq_len) にフラット化して計算
+    loss = criterion(logits.view(-1, dataset_decoder.num_embeddings), target_tensor.view(-1))
 
     # 誤差逆伝播
-    optimizer.zero_grad() # 勾配の初期化
-    loss.backward() # 誤差逆伝播。どう動かせばいいか学習する
-    optimizer.step() # 重みの更新。backwardで計算した結果をもとに実際に更新する
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
 
     # 10エポックごとに損失を表示
     if (epoch + 1) % 10 == 0:
         print(f"Epoch {epoch+1:3d}/{config.epochs} | Loss: {loss.item():.6f}")
 
-# === 単語を予測
-model.eval() # 単語を予測モードに
-with torch.no_grad(): # withは、自動で後処理を実行してくれる文。
-    # 系列
-    # attention, _ = model(input_tensor) # attentionだけ取り出せればいい
-    # 2値
-    logits = model(input_tensor)
 
-    # 系列での予測
-    # distances = torch.cdist(attention, model.embedding_layer.weight) # attentionの出力と単語ベクトルを照らし合わせ、全部の距離を計算している。
-    # predicted_ids = torch.argmin(distances, dim=-1)
-    # 2値
-    logits_at_mask = logits[:, -1, :]             # ★右端の [MASK] 位置を取り出す
-    predicted_ids = logits_at_mask.argmax(dim=-1)  # ★最も確率の高いIDを取得 (Batch,) の形になる
+# === 自己回帰生成関数の定義
+def generate_autoregressive(model, number, char_to_id, id_to_char, max_len=12):
+    model.eval()
+    with torch.no_grad():
+        # 1. プロンプトを作成: 例 "  123[SEP]" (長さ 6)
+        prompt_str = f"{number:>5}"
+        prompt_chars = list(prompt_str) + ['[SEP]']
+        input_ids = [char_to_id[c] for c in prompt_chars]
+        
+        # デコーダーループ
+        for _ in range(max_len - len(prompt_chars)):
+            # テンソル化してバッチ次元を追加 (1, seq_len)
+            input_t = torch.tensor([input_ids], dtype=torch.long, device=next(model.parameters()).device)
+            
+            # 推論
+            logits = model(input_t)  # (1, seq_len, num_embeddings)
+            
+            # 最後のトークンの出力ロジットを取得
+            last_logit = logits[0, -1, :]  # (num_embeddings,)
+            
+            # 最も確率の高いIDを取得
+            pred_id = last_logit.argmax(dim=-1).item()
+            
+            # 終了トークンならループを抜ける
+            if pred_id == char_to_id['[EOS]']:
+                break
+                
+            # 出力系列に追加
+            input_ids.append(pred_id)
+            
+        # [SEP] より後ろの部分を取り出して文字列に戻す
+        sep_idx = prompt_chars.index('[SEP]')
+        generated_ids = input_ids[sep_idx + 1:]
+        generated_chars = [id_to_char[idx] for idx in generated_ids]
+        return "".join(generated_chars)
 
-# 結果を表示。系列
-"""
+
+# 結果を表示 (前半15件)
 print("\n--- 学習後の予測結果 (前半15件) ---")
-for i in range(100):
-    num = dataset.numbers[i]
-    orig_word = dataset.outputs[i]
-    pred_chars = [dataset.id_to_char[idx.item()] for idx in predicted_ids[i]]
-    pred_word = "".join(pred_chars).strip()
-    print(f"Num: {num} | 元の単語: {orig_word:4s} -> 予測された単語: {pred_word}")
-"""
- 
-# 結果を表示 2値
-print("\n--- 学習後の予測結果 (前半15件) ---")
-for i in range(1000):
-    num = dataset_decoder.numbers[i]  # 元の数字 (文字列)
-    orig_label = target_tensor[i].item()
-    pred_label = predicted_ids[i].item()  # 予測ラベル (0 または 1)
+for i in range(15):
+    num = dataset_decoder.numbers[i]
+    orig_label = dataset_decoder.outputs[i]
+    pred_label = generate_autoregressive(
+        model, num, dataset_decoder.char_to_id, dataset_decoder.id_to_char
+    )
     
-    # 1のときは "Aho"、0のときは元の数字を表示用にする
-    orig_display = "Aho" if orig_label == dataset_decoder.char_to_id['1'] else num
-    pred_display = "Aho" if pred_label == dataset_decoder.char_to_id['1'] else num
     status = "◯" if orig_label == pred_label else "×"
-    print(f"Num: {num:>3s} | 正解: {orig_display:4s} -> 予測: {pred_display} | {status}")
-
+    print(f"Num: {num:>3s} | 正解: {orig_label:4s} -> 予測: {pred_label:4s} | {status}")
 
 
 # ==========================================
-# === 未知のデータ (2001〜3000) でのテスト推論
+# === 未知のデータ (2001〜2100) でのテスト推論
 # ==========================================
-test_numbers = list(range(2001, 3000))  # 学習時に見せていないデータ
+test_numbers = list(range(2001, 2101))
 
-# 1. 追加した関数でテストデータをテンソルに変換
-test_input_tensor = dataset_decoder.encode_numbers(test_numbers)
-
-# 2. モデルを評価モードにして推論を実行
-model.eval()
-with torch.no_grad():
-    logits = model(test_input_tensor) # 104行目: test_input_tensor を渡す
-    logits_at_mask = logits[:, -1, :]
-    predicted_ids = logits_at_mask.argmax(dim=-1)
-
-# 3. テストデータの正解ラベル ('1'のID または '0'のID) を準備
-# (修正点: 数値の 0, 1 ではなく、辞書上の文字IDを登録します)
-test_targets = []
-for n in test_numbers:
-    is_multiple_of_3 = (n % 3 == 0)
-    contains_3 = ('3' in str(n))
-    label_char = '1' if (is_multiple_of_3 or contains_3) else '0'
-    test_targets.append(dataset_decoder.char_to_id[label_char])
-
-# 4. 結果の表示と正答率の計算
-print("\n--- 未知のデータ (2001〜3000) での予測結果 (前半15件) ---")
+print("\n--- 未知のデータ (2001〜2100) での予測結果 (前半15件) ---")
 correct_count = 0
 
 for i, num in enumerate(test_numbers):
-    orig_label_id = test_targets[i]
-    pred_label_id = predicted_ids[i].item() # テストデータの予測ID
+    is_multiple_of_3 = (num % 3 == 0)
+    contains_3 = ('3' in str(num))
+    orig_label = "Aho" if (is_multiple_of_3 or contains_3) else str(num)
     
-    # '1' のIDなら Aho、それ以外は数字そのものを表示
-    orig_display = "Aho" if orig_label_id == dataset_decoder.char_to_id['1'] else str(num)
-    pred_display = "Aho" if pred_label_id == dataset_decoder.char_to_id['1'] else str(num)
+    # 自己回帰生成
+    pred_label = generate_autoregressive(
+        model, num, dataset_decoder.char_to_id, dataset_decoder.id_to_char
+    )
     
-    status = "◯" if orig_label_id == pred_label_id else "×"
-    if orig_label_id == pred_label_id:
+    status = "◯" if orig_label == pred_label else "×"
+    if orig_label == pred_label:
         correct_count += 1
         
-    if i < 15: # 前半15件のみコンソール表示
-        print(f"Num: {num:>3d} | 正解: {orig_display:4s} -> 予測: {pred_display:4s} | {status}")
+    if i < 15:  # 前半15件を表示
+        print(f"Num: {num:>4d} | 正解: {orig_label:4s} -> 予測: {pred_label:4s} | {status}")
 
 # 全体の正答率を表示
 accuracy = (correct_count / len(test_numbers)) * 100
 print(f"\n未知データでの正解率 (Accuracy): {accuracy:.1f}% ({correct_count}/{len(test_numbers)})")
+
+# === 対話テストモード (ターミナルからの入力受け取り)
+print("\n" + "="*40)
+print("--- 対話テストモード (終了するには Enter キーのみ、または Ctrl+C) ---")
+try:
+    while True:
+        user_input = input("数字を入力してください: ").strip()
+        if not user_input:
+            print("終了します。")
+            break
+        if not user_input.isdigit():
+            print("エラー: 半角数字のみ入力可能です。")
+            continue
+            
+        num = int(user_input)
+        # 自己回帰生成を実行
+        pred_label = generate_autoregressive(
+            model, num, dataset_decoder.char_to_id, dataset_decoder.id_to_char
+        )
+        print(f"入力: {num:>5d} -> 生成（予測）結果: {pred_label}\n")
+except KeyboardInterrupt:
+    print("\n終了します。")
