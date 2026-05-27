@@ -90,7 +90,7 @@ for i in range(15):
 # ==========================================
 # === 未知のデータ (2001〜2100) でのテスト推論
 # ==========================================
-test_numbers = list(range(2001, 2101))
+test_numbers = list(range(config.num_train_data, (config.num_test_data + 1)))
 
 print("\n--- 未知のデータ (2001〜2100) での予測結果 (前半15件) ---")
 correct_count = 0

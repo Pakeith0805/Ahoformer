@@ -23,7 +23,9 @@ class AhoformerEncoder(nn.Module): # modelを呼び出すと、initで定義し�
         self.encoder = Encoder()
         
         # 8文字を2値に分類するFFN
-        self.classifier = nn.Linear(config.num_digits * config.d_model, 1)
+        #self.classifier = nn.Linear(config.num_digits * config.d_model, 1)
+        # プーリングver
+        self.classifier = nn.Linear(config.d_model, 1)
 
     def forward(self, x): # 学習のさい、input側だからinput_vectors
         input_vectors = self.embedding_layer(x)
@@ -35,7 +37,11 @@ class AhoformerEncoder(nn.Module): # modelを呼び出すと、initで定義し�
         out = self.encoder(pos_vectors)
         
         # フラット化して全結合層に入力し、ロジット (logits) を計算
-        flat_out = out.view(out.size(0), -1)  # 形状: (Batch, 8 * d_model)
-        logits = self.classifier(flat_out)  # 形状: (Batch, 1)
+        #flat_out = out.view(out.size(0), -1)  # 形状: (Batch, 8 * d_model)
+        #logits = self.classifier(flat_out)  # 形状: (Batch, 1)
+
+        # 平均プーリングを適用: (Batch, SeqLen, d_model) -> (Batch, d_model)
+        pooled = out.mean(dim=1)
+        logits = self.classifier(pooled)
 
         return logits, input_vectors

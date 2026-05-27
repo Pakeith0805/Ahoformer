@@ -5,9 +5,11 @@ num_head = 4
 d_model = 64 # 単語の次元数
 d_k = d_model // num_head
 epochs = 1000
-lr = 0.01
+lr = 0.0003
 num_digits = 8 # 何桁の数字まで扱えるようにするか
 d_ff = 128 # FFNの中間層の隠れ次元数
+num_train_data = 40000
+num_test_data = 10000
 # --- スイッチの設定 ---
 USE_RESIDUAL = False   # 残差接続を使うか
 USE_LAYERNORM = False  # レイヤー正規化を使うか

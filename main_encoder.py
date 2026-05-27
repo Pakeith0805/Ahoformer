@@ -90,7 +90,7 @@ for i in range(1000):
 # === 未知のデータ (101〜150) でのテスト推論
 # ==========================================
 
-test_numbers = list(range(2001, 3000))  # 学習時に見せていないデータ
+test_numbers = list(range(config.num_train_data, (config.num_test_data + 1)))  # 学習時に見せていないデータ
 
 # 1. 追加した関数でテストデータをテンソルに変換
 test_input_tensor = dataset.encode_numbers(test_numbers)

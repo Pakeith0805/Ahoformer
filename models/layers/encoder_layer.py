@@ -15,16 +15,19 @@ class Encoder(nn.Module):
         self.layernorm1 = nn.LayerNorm(normalized_shape = config.d_model)
         self.layernorm2 = nn.LayerNorm(normalized_shape = config.d_model)
 
+        self.dropout1 = nn.Dropout(0.05)
+        self.dropout2 = nn.Dropout(0.05)
+
         # 普通のffn
         self.ffn = FFN(config.d_model, config.d_ff)
 
     def forward(self, x): # 位置エンコーディングまで終わったテンソルを受け取る
         # 残差接続
-        out = x + self.attention(x)
+        out = x + self.dropout1(self.attention(x))
         out = self.layernorm1(out)
 
         # 残差接続
-        out = out + self.ffn(out)
+        out = out + self.dropout2(self.ffn(out))
         out = self.layernorm2(out)
 
         return out
