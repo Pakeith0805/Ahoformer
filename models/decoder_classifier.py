@@ -22,9 +22,6 @@ class AhoformerDecoder(nn.Module): # modelを呼び出すと、initで定義し�
         # decoderのまとまり
         self.decoder = Decoder()
         
-        # 8文字を2値に分類するFFN
-        # .classifier = nn.Linear(config.num_digits * config.d_model, 1)
-
         # 出力層
         self.output_linear = nn.Linear(config.d_model, num_embeddings)
 

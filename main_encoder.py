@@ -82,7 +82,7 @@ for i in range(100):
 print("\n--- 学習後の予測結果 (前半15件) ---")
 for i in range(0):
     num = dataset.numbers[i]  # 元の数字 (文字列)
-    orig_label = int(dataset.outputs[i])  # 正解ラベル (0 または 1)
+    orig_label = 1 if dataset.outputs[i] == "Aho" else 0  # 正解ラベル (0 または 1)
     pred_label = predicted_ids[i].item()  # 予測ラベル (0 または 1)
     
     # 1のときは "Aho"、0のときは元の数字を表示用にする

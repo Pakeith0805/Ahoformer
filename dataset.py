@@ -44,7 +44,7 @@ target_ids_seq = [[char_to_id[char] for char in seq] for seq in outputs_split]
 target_tensor_seq = torch.tensor(target_ids_seq, dtype=torch.long)  # 形状: (単語数, 8)
 
 # 2値分類の場合のtarget tensor
-target_ids_bin = [int(word) for word in outputs]
+target_ids_bin = [1 if word == "Aho" else 0 for word in outputs]
 target_tensor_bin = torch.tensor(target_ids_bin, dtype=torch.float32).unsqueeze(1) # 出力とtargetのデータ型が一致している必要があるためfloatに
 
 
