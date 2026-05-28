@@ -17,14 +17,12 @@ class AhoformerEncoder(nn.Module): # modelを呼び出すと、initで定義し�
         self.embedding_layer = nn.Embedding(num_embeddings, config.d_model)
 
          # 位置エンコーディング層を初期化する
-        self.pos_encoder = PositionalEncoding(config.d_model, config.num_digits)
+        self.pos_encoder = PositionalEncoding(config.d_model, config.num_digits + 1)
         
         # encoderのまとまり
         self.encoder = Encoder()
         
-        # 8文字を2値に分類するFFN
-        #self.classifier = nn.Linear(config.num_digits * config.d_model, 1)
-        # プーリングver
+        # 2値分類するFFN
         self.classifier = nn.Linear(config.d_model, 1)
 
     def forward(self, x): # 学習のさい、input側だからinput_vectors
@@ -36,12 +34,8 @@ class AhoformerEncoder(nn.Module): # modelを呼び出すと、initで定義し�
         # encoderに通す
         out = self.encoder(pos_vectors)
         
-        # フラット化して全結合層に入力し、ロジット (logits) を計算
-        #flat_out = out.view(out.size(0), -1)  # 形状: (Batch, 8 * d_model)
-        #logits = self.classifier(flat_out)  # 形状: (Batch, 1)
-
-        # 平均プーリングを適用: (Batch, SeqLen, d_model) -> (Batch, d_model)
-        pooled = out.mean(dim=1)
-        logits = self.classifier(pooled)
+        # [CLS]トークンを含むすべてのトークン出力の平均（Mean Pooling）を計算
+        mean_output = out.mean(dim=1)
+        logits = self.classifier(mean_output)
 
         return logits, input_vectors

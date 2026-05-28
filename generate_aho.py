@@ -1,4 +1,5 @@
 import csv
+import config
 
 # 1. 保存するファイル名とヘッダー（列名）を指定
 file_name = "aho_dataset_standard.csv"
@@ -12,7 +13,7 @@ with open(file_name, mode="w", encoding="utf-8-sig", newline="") as f:
     writer.writeheader()
     
     # 3. ループを回しながら1行ずつ書き込む
-    for i in range(1, 1001):
+    for i in range(1, config.num_train_data):
         is_multiple_of_3 = (i % 3 == 0)
         contains_3 = ('3' in str(i))
         

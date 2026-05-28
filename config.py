@@ -4,7 +4,7 @@
 num_head = 4
 d_model = 64 # 単語の次元数
 d_k = d_model // num_head
-epochs = 1000
+epochs = 1200
 lr = 0.0003
 num_digits = 8 # 何桁の数字まで扱えるようにするか
 d_ff = 128 # FFNの中間層の隠れ次元数

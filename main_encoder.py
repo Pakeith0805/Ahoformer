@@ -41,9 +41,16 @@ for epoch in range (config.epochs):
     loss.backward() # 誤差逆伝播。どう動かせばいいか学習する
     optimizer.step() # 重みの更新。backwardで計算した結果をもとに実際に更新する
 
-    # 10エポックごとに損失を表示
+    # 10エポックごとに損失とAccuracyを表示
     if (epoch + 1) % 10 == 0:
-        print(f"Epoch {epoch+1:3d}/{config.epochs} | Loss: {loss.item():.6f}")
+        with torch.no_grad():
+            # 予測値（0か1）を算出
+            predicted_labels = (torch.sigmoid(logits) >= 0.5).float()
+            # 正解数をカウント
+            correct = (predicted_labels == target_tensor).sum().item()
+            # 精度(%)を計算
+            accuracy = (correct / target_tensor.size(0)) * 100
+        print(f"Epoch {epoch+1:3d}/{config.epochs} | Loss: {loss.item():.6f} | Accuracy: {accuracy:.2f}%")
 
 # === 単語を予測
 model.eval() # 単語を予測モードに
@@ -73,7 +80,7 @@ for i in range(100):
  
 # 結果を表示 2値
 print("\n--- 学習後の予測結果 (前半15件) ---")
-for i in range(1000):
+for i in range(0):
     num = dataset.numbers[i]  # 元の数字 (文字列)
     orig_label = int(dataset.outputs[i])  # 正解ラベル (0 または 1)
     pred_label = predicted_ids[i].item()  # 予測ラベル (0 または 1)
@@ -90,7 +97,7 @@ for i in range(1000):
 # === 未知のデータ (101〜150) でのテスト推論
 # ==========================================
 
-test_numbers = list(range(config.num_train_data, (config.num_test_data + 1)))  # 学習時に見せていないデータ
+test_numbers = list(range(config.num_train_data + 1, config.num_train_data + config.num_test_data + 1))  # 学習時に見せていないデータ
 
 # 1. 追加した関数でテストデータをテンソルに変換
 test_input_tensor = dataset.encode_numbers(test_numbers)
