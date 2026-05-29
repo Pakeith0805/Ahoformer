@@ -1,140 +1,183 @@
+import os
+import numpy as np
+import pandas as pd
 import torch
-import torch.nn as nn # embeddingに使う
-import torch.optim as optim # optimizerを使う
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
 import config
 import dataset
-from models import AhoformerEncoder
+from models import AhoformerSpectralEncoder
 
-# モデルと損失関数の作成
-model = AhoformerEncoder(dataset.num_embeddings) # num_embeddingsは単語の種類数。
-# 系列変換モデル用
-# criterion = nn.MSELoss() # 損失関数。これは平均二乗誤差
-# 2値分類用
-criterion = nn.BCEWithLogitsLoss()
+# Set random seed for reproducibility
+def set_seed(seed=42):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
-# === 学習の設定
-optimizer = optim.Adam(model.parameters(), lr=config.lr)
+set_seed(42)
 
-# === 訓練データ
-input_tensor = dataset.input_tensor
-target_tensor = dataset.target_tensor_bin
+# Check device
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 
-# === 学習開始
-print("--- 学習開始 ---")
+# 1. Load the training data
+print("Loading train.csv...")
+X, y, sample_ids, species_ids = dataset.load_train_data("train.csv", use_snv=True)
+num_samples = X.shape[0]
+num_features = X.shape[1]
+print(f"Loaded {num_samples} samples with {num_features} features.")
 
-for epoch in range (config.epochs):
-    # 順伝播。系列
-    # attention, input_vectors = model(input_tensor)
-    # 順伝播。2値分類
-    logits, _ = model(input_tensor)
+# K-Fold split generator (pure numpy, 100% robust)
+def get_kfold_indices(n, k=5, seed=42):
+    indices = np.arange(n)
+    np.random.seed(seed)
+    np.random.shuffle(indices)
+    fold_sizes = np.full(k, n // k, dtype=int)
+    fold_sizes[:n % k] += 1
+    current = 0
+    folds = []
+    for fold_size in fold_sizes:
+        val_indices = indices[current:current + fold_size]
+        train_indices = np.concatenate([indices[:current], indices[current + fold_size:]])
+        folds.append((train_indices, val_indices))
+        current += fold_size
+    return folds
 
-    # 2値分類では不要
-    # target_vectors = model.embedding_layer(target_tensor).detach()
+# Hyperparameters
+K = 5
+epochs = 100
+batch_size = 32
+learning_rate = 0.001
 
-    # 損失計算。系列
-    # loss = criterion(attention, target_vectors)
-    # 損失計算。2値分類
-    loss = criterion(logits, target_tensor)
+print(f"Starting {K}-Fold Cross-Validation...")
+folds = get_kfold_indices(num_samples, k=K, seed=42)
+fold_val_rmses = []
+fold_models = []
 
-    # 誤差逆伝播
-    optimizer.zero_grad() # 勾配の初期化
-    loss.backward() # 誤差逆伝播。どう動かせばいいか学習する
-    optimizer.step() # 重みの更新。backwardで計算した結果をもとに実際に更新する
-
-    # 10エポックごとに損失とAccuracyを表示
-    if (epoch + 1) % 10 == 0:
-        with torch.no_grad():
-            # 予測値（0か1）を算出
-            predicted_labels = (torch.sigmoid(logits) >= 0.5).float()
-            # 正解数をカウント
-            correct = (predicted_labels == target_tensor).sum().item()
-            # 精度(%)を計算
-            accuracy = (correct / target_tensor.size(0)) * 100
-        print(f"Epoch {epoch+1:3d}/{config.epochs} | Loss: {loss.item():.6f} | Accuracy: {accuracy:.2f}%")
-
-# === 単語を予測
-model.eval() # 単語を予測モードに
-with torch.no_grad(): # withは、自動で後処理を実行してくれる文。
-    # 系列
-    # attention, _ = model(input_tensor) # attentionだけ取り出せればいい
-    # 2値
-    logits, _ = model(input_tensor)
-
-    # 系列での予測
-    # distances = torch.cdist(attention, model.embedding_layer.weight) # attentionの出力と単語ベクトルを照らし合わせ、全部の距離を計算している。
-    # predicted_ids = torch.argmin(distances, dim=-1)
-    # 2値
-    probs = torch.sigmoid(logits)
-    predicted_ids = (probs >= 0.5).long()
-
-# 結果を表示。系列
-"""
-print("\n--- 学習後の予測結果 (前半15件) ---")
-for i in range(100):
-    num = dataset.numbers[i]
-    orig_word = dataset.outputs[i]
-    pred_chars = [dataset.id_to_char[idx.item()] for idx in predicted_ids[i]]
-    pred_word = "".join(pred_chars).strip()
-    print(f"Num: {num} | 元の単語: {orig_word:4s} -> 予測された単語: {pred_word}")
-"""
- 
-# 結果を表示 2値
-print("\n--- 学習後の予測結果 (前半15件) ---")
-for i in range(0):
-    num = dataset.numbers[i]  # 元の数字 (文字列)
-    orig_label = 1 if dataset.outputs[i] == "Aho" else 0  # 正解ラベル (0 または 1)
-    pred_label = predicted_ids[i].item()  # 予測ラベル (0 または 1)
+for fold in range(K):
+    print(f"\n--- Fold {fold+1}/{K} ---")
+    train_idx, val_idx = folds[fold]
     
-    # 1のときは "Aho"、0のときは元の数字を表示用にする
-    orig_display = "Aho" if orig_label == 1 else num
-    pred_display = "Aho" if pred_label == 1 else num
+    # Create datasets
+    train_dataset = dataset.WoodSpectralDataset(X[train_idx], y[train_idx])
+    val_dataset = dataset.WoodSpectralDataset(X[val_idx], y[val_idx])
     
-    print(f"Num: {num:>3s} | 正解: {orig_display:4s} -> 予測: {pred_display}")
-
-
-
-# ==========================================
-# === 未知のデータ (101〜150) でのテスト推論
-# ==========================================
-
-test_numbers = list(range(config.num_train_data + 1, config.num_train_data + config.num_test_data + 1))  # 学習時に見せていないデータ
-
-# 1. 追加した関数でテストデータをテンソルに変換
-test_input_tensor = dataset.encode_numbers(test_numbers)
-
-# 2. モデルを評価モードにして推論を実行
-model.eval()
-with torch.no_grad():
-    logits, _ = model(test_input_tensor)
-    probs = torch.sigmoid(logits)
-    predicted_labels = (probs >= 0.5).long()
-
-# 3. テストデータの正解ラベル (0 or 1) をプログラム側で計算しておく
-test_targets = []
-for n in test_numbers:
-    is_multiple_of_3 = (n % 3 == 0)
-    contains_3 = ('3' in str(n))
-    test_targets.append(1 if (is_multiple_of_3 or contains_3) else 0)
-
-# 4. 結果の表示と正答率の計算
-print("\n--- 未知のデータ (101〜150) での予測結果 ---")
-correct_count = 0
-
-for i, num in enumerate(test_numbers):
-    orig_label = test_targets[i]
-    pred_label = predicted_labels[i].item()
+    # Create dataloaders
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     
-    # 1のときは "Aho"、0のときは元の数字を表示用に整形
-    orig_display = "Aho" if orig_label == 1 else str(num)
-    pred_display = "Aho" if pred_label == 1 else str(num)
+    # Initialize model
+    model = AhoformerSpectralEncoder().to(device)
     
-    # 正解・不正解のマーク判定
-    status = "◯" if orig_label == pred_label else "×"
-    if orig_label == pred_label:
-        correct_count += 1
+    # Loss and optimizer
+    criterion = nn.MSELoss()
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    
+    best_val_rmse = float('inf')
+    best_weights_path = f"best_model_fold_{fold}.pth"
+    
+    for epoch in range(epochs):
+        model.train()
+        train_loss = 0.0
+        for batch_x, batch_y in train_loader:
+            batch_x, batch_y = batch_x.to(device), batch_y.to(device)
+            
+            # Forward pass
+            preds = model(batch_x)
+            loss = criterion(preds, batch_y)
+            
+            # Backward and optimize
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            train_loss += loss.item() * batch_x.size(0)
+            
+        scheduler.step()
+        train_loss /= len(train_idx)
         
-    print(f"Num: {num:>3d} | 正解: {orig_display:4s} -> 予測: {pred_display:4s} | {status}")
+        # Validation
+        model.eval()
+        val_mse = 0.0
+        with torch.no_grad():
+            for batch_x, batch_y in val_loader:
+                batch_x, batch_y = batch_x.to(device), batch_y.to(device)
+                preds = model(batch_x)
+                loss = criterion(preds, batch_y)
+                val_mse += loss.item() * batch_x.size(0)
+        
+        val_mse /= len(val_idx)
+        val_rmse = np.sqrt(val_mse)
+        
+        if val_rmse < best_val_rmse:
+            best_val_rmse = val_rmse
+            torch.save(model.state_dict(), best_weights_path)
+            
+        if (epoch + 1) % 20 == 0 or epoch == epochs - 1:
+            print(f"Epoch {epoch+1:3d}/{epochs} | Train Loss: {train_loss:.4f} | Val RMSE: {val_rmse:.4f} | Best Val RMSE: {best_val_rmse:.4f}")
+            
+    print(f"Fold {fold+1} Best Val RMSE: {best_val_rmse:.4f}")
+    fold_val_rmses.append(best_val_rmse)
 
-# 全体の正答率を表示
-accuracy = (correct_count / len(test_numbers)) * 100
-print(f"\n未知データでの正解率 (Accuracy): {accuracy:.1f}% ({correct_count}/{len(test_numbers)})")
+# Calculate estimation accuracy (overall cross-validation accuracy)
+mean_rmse = np.mean(fold_val_rmses)
+std_rmse = np.std(fold_val_rmses)
+print(f"\n==========================================")
+print(f"Cross-Validation Summary:")
+for f, rmse in enumerate(fold_val_rmses):
+    print(f"  Fold {f+1}: RMSE = {rmse:.4f}")
+print(f"Overall Estimation RMSE: {mean_rmse:.4f} ± {std_rmse:.4f}")
+print(f"==========================================")
+
+
+# ==========================================
+# === Inference on test.csv
+# ==========================================
+print("\nLoading test.csv...")
+X_test, test_sample_numbers, test_species_ids = dataset.load_test_data("test.csv", use_snv=True)
+test_dataset = dataset.WoodSpectralDataset(X_test)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+print("Running inference with ensembled fold models...")
+predictions_all = []
+
+for fold in range(K):
+    # Initialize model
+    model = AhoformerSpectralEncoder().to(device)
+    # Load best weights
+    best_weights_path = f"best_model_fold_{fold}.pth"
+    model.load_state_dict(torch.load(best_weights_path))
+    model.eval()
+    
+    fold_preds = []
+    with torch.no_grad():
+        for batch_x in test_loader:
+            batch_x = batch_x.to(device)
+            preds = model(batch_x)
+            fold_preds.append(preds.cpu().numpy())
+            
+    fold_preds = np.concatenate(fold_preds, axis=0).squeeze()
+    predictions_all.append(fold_preds)
+    
+    # Cleanup weight file
+    try:
+        os.remove(best_weights_path)
+    except OSError:
+        pass
+
+# Average the predictions across all folds
+avg_predictions = np.mean(predictions_all, axis=0)
+
+# Create submission dataframe matching sample_submit.csv format (no header, sample ID, prediction)
+submission_df = pd.DataFrame({
+    "sample_number": test_sample_numbers,
+    "moisture_content": avg_predictions
+})
+
+# Save to submission.csv
+submission_df.to_csv("submission.csv", index=False, header=False)
+print("Saved final ensembled predictions to submission.csv.")
+print(f"Predictions stats: Min={avg_predictions.min():.2f}, Max={avg_predictions.max():.2f}, Mean={avg_predictions.mean():.2f}")

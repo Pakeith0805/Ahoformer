@@ -54,3 +54,56 @@ class AhoformerEncoder(nn.Module): # modelを呼び出すと、initで定義し�
         logits = self.classifier(mean_output)
 
         return logits, input_vectors
+
+
+class AhoformerSpectralEncoder(nn.Module):
+    """
+    Transformer Encoder model designed specifically for 1D continuous spectral signals (e.g. NIR spectra).
+    It projects the continuous 1D signals into a sequence using a 1D Conv layer, adds positional encoding,
+    passes it through the Transformer Encoder, and outputs a regression scalar (moisture content).
+    """
+    def __init__(self):
+        super().__init__()
+        # Conv1D to map the continuous 1D spectral signal to sequence embeddings
+        # input shape: (Batch, 1, 1555) -> output shape: (Batch, d_model, 97)
+        self.embedding_layer = nn.Conv1d(
+            in_channels=1, 
+            out_channels=config.d_model, 
+            kernel_size=16, 
+            stride=16
+        )
+
+        # Positional encoding for sequence length 97
+        self.pos_encoder = PositionalEncoding(config.d_model, max_len=128)
+        
+        # Encoder module
+        self.encoder = Encoder()
+
+        # Regression head to map pooled sequence representations to moisture content scalar
+        self.regressor = nn.Sequential(
+            nn.Linear(config.d_model, config.d_model),
+            nn.ReLU(),
+            nn.Dropout(0.05),
+            nn.Linear(config.d_model, 1)
+        )
+
+    def forward(self, x):
+        # x: shape (Batch, 1, 1555)
+        
+        # Project 1D spectral signal to sequence embeddings
+        out = self.embedding_layer(x) # (Batch, d_model, 97)
+        out = out.transpose(1, 2)     # (Batch, 97, d_model)
+
+        # Add positional encoding
+        out = self.pos_encoder(out)
+
+        # Pass through Transformer Encoder
+        out = self.encoder(out)
+
+        # Mean pooling over the sequence dimension
+        mean_output = out.mean(dim=1)  # (Batch, d_model)
+
+        # Map to regression output
+        preds = self.regressor(mean_output) # (Batch, 1)
+        
+        return preds
