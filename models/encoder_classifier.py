@@ -65,19 +65,22 @@ class AhoformerSpectralEncoder(nn.Module):
     def __init__(self):
         super().__init__()
         # Conv1D to map the continuous 1D spectral signal to sequence embeddings
-        # input shape: (Batch, 1, 1555) -> output shape: (Batch, d_model, 97)
+        # input shape: (Batch, 1, 1555) -> output shape: (Batch, d_model, 129)
         self.embedding_layer = nn.Conv1d(
             in_channels=1, 
             out_channels=config.d_model, 
             kernel_size=16, 
-            stride=16
+            stride=12
         )
 
-        # Positional encoding for sequence length 97
-        self.pos_encoder = PositionalEncoding(config.d_model, max_len=128)
+        # Positional encoding for sequence length 129
+        self.pos_encoder = PositionalEncoding(config.d_model, max_len=512)
         
-        # Encoder module
-        self.encoder = Encoder()
+        # Encoder module (2-layer stack)
+        self.encoder = nn.Sequential(
+            Encoder(),
+            Encoder()
+        )
 
         # Regression head to map pooled sequence representations to moisture content scalar
         self.regressor = nn.Sequential(
@@ -91,8 +94,8 @@ class AhoformerSpectralEncoder(nn.Module):
         # x: shape (Batch, 1, 1555)
         
         # Project 1D spectral signal to sequence embeddings
-        out = self.embedding_layer(x) # (Batch, d_model, 97)
-        out = out.transpose(1, 2)     # (Batch, 97, d_model)
+        out = self.embedding_layer(x) # (Batch, d_model, 129)
+        out = out.transpose(1, 2)     # (Batch, 129, d_model)
 
         # Add positional encoding
         out = self.pos_encoder(out)

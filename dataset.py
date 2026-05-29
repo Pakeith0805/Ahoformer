@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+from scipy.signal import savgol_filter
 
 class WoodSpectralDataset(Dataset):
     """
@@ -26,6 +27,14 @@ class WoodSpectralDataset(Dataset):
         return self.features[idx]
 
 
+def apply_savgol_derivative(x, window_length=15, polyorder=2, deriv=1):
+    """
+    Apply Savitzky-Golay filtering and calculate the derivative.
+    Helps resolve overlapping peaks and removes baseline offsets.
+    """
+    return savgol_filter(x, window_length=window_length, polyorder=polyorder, deriv=deriv, axis=-1)
+
+
 def apply_snv(x):
     """
     Apply Standard Normal Variate (SNV) preprocessing to NIR spectra.
@@ -36,44 +45,34 @@ def apply_snv(x):
     return (x - mean) / (std + 1e-8)
 
 
-def load_train_data(file_path="train.csv", use_snv=True):
+def load_train_data(file_path="train.csv", use_savgol=True, use_snv=True):
     """
-    Load training data, extract features and targets, and apply optional SNV normalization.
+    Load training data, extract features and targets, and apply optional Savitzky-Golay and SNV normalization.
     """
     df = pd.read_csv(file_path, encoding="cp932")
-    
-    # Target variable '含水率' (moisture content) is the 4th column (index 3)
-    # The columns: 
-    # Col 0: sample number
-    # Col 1: species number
-    # Col 2: 樹種 (species name)
-    # Col 3: 含水率 (moisture content)
-    # Col 4 to end: wavelengths (1555 features)
     
     y = df.iloc[:, 3].values
     X = df.iloc[:, 4:].values
     
+    if use_savgol:
+        X = apply_savgol_derivative(X)
     if use_snv:
         X = apply_snv(X)
         
     return X, y, df["sample number"].values, df["species number"].values
 
 
-def load_test_data(file_path="test.csv", use_snv=True):
+def load_test_data(file_path="test.csv", use_savgol=True, use_snv=True):
     """
-    Load test data, extract features, and apply optional SNV normalization.
+    Load test data, extract features, and apply optional Savitzky-Golay and SNV normalization.
     """
     df = pd.read_csv(file_path, encoding="cp932")
-    
-    # Test dataset does NOT contain '含水率' column (it has 1558 columns total)
-    # Col 0: sample number
-    # Col 1: species number
-    # Col 2: 樹種 (species name)
-    # Col 3 to end: wavelengths (1555 features)
     
     sample_numbers = df.iloc[:, 0].values
     X = df.iloc[:, 3:].values
     
+    if use_savgol:
+        X = apply_savgol_derivative(X)
     if use_snv:
         X = apply_snv(X)
         
