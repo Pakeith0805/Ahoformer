@@ -50,7 +50,7 @@ def get_kfold_indices(n, k=5, seed=42):
     return folds
 
 # Hyperparameters
-K = 5
+K = 10
 epochs = config.epochs
 batch_size = 32
 learning_rate = config.lr
@@ -64,9 +64,9 @@ for fold in range(K):
     print(f"\n--- Fold {fold+1}/{K} ---")
     train_idx, val_idx = folds[fold]
     
-    # Create datasets (inputs have shape (N, 1, 1555), targets shape (N, 1))
-    train_dataset = dataset.WoodSpectralDataset(X[train_idx], y_log[train_idx])
-    val_dataset = dataset.WoodSpectralDataset(X[val_idx], y_log[val_idx])
+    # Create datasets (inputs have shape (N, C, 1555), targets shape (N, 1))
+    train_dataset = dataset.WoodSpectralDataset(X[train_idx], y_log[train_idx], augment=True)
+    val_dataset = dataset.WoodSpectralDataset(X[val_idx], y_log[val_idx], augment=False)
     
     # Create dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
