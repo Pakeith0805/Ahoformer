@@ -90,7 +90,7 @@ class AhoformerSpectralEncoder(nn.Module):
             nn.Linear(config.d_model, 1)
         )
 
-    def forward(self, x):
+    def forward(self, x, return_features=False):
         # x: shape (Batch, 2, 1555)
         
         # Project 1D spectral signal to sequence embeddings
@@ -105,6 +105,9 @@ class AhoformerSpectralEncoder(nn.Module):
 
         # Mean pooling over the sequence dimension
         mean_output = out.mean(dim=1)  # (Batch, d_model)
+
+        if return_features:
+            return mean_output
 
         # Map to regression output
         preds = self.regressor(mean_output) # (Batch, 1)
