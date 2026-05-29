@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from sklearn.model_selection import GroupKFold
 import config
 import dataset
 from models import AhoformerSpectralEncoder
@@ -23,50 +24,45 @@ torch.set_num_threads(4)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
-# 1. Load the training data (applies Savitzky-Golay 1st derivative + SNV scaling)
+# 1. Load the training data (applies Savitzky-Golay 1st & 2nd derivative + SNV scaling -> 2 channels)
 print("Loading train.csv...")
 X, y, sample_ids, species_ids = dataset.load_train_data("train.csv", use_savgol=True, use_snv=True)
 num_samples = X.shape[0]
-num_features = X.shape[1]
-print(f"Loaded {num_samples} samples with {num_features} features.")
-
-# Log transformation of the target variable to stabilize training on extreme values
-y_log = np.log1p(y)
-
-# K-Fold split generator (pure numpy, 100% robust)
-def get_kfold_indices(n, k=5, seed=42):
-    indices = np.arange(n)
-    np.random.seed(seed)
-    np.random.shuffle(indices)
-    fold_sizes = np.full(k, n // k, dtype=int)
-    fold_sizes[:n % k] += 1
-    current = 0
-    folds = []
-    for fold_size in fold_sizes:
-        val_indices = indices[current:current + fold_size]
-        train_indices = np.concatenate([indices[:current], indices[current + fold_size:]])
-        folds.append((train_indices, val_indices))
-        current += fold_size
-    return folds
+num_features = X.shape[2]
+print(f"Loaded {num_samples} samples with {num_features} wavelengths (2 channels).")
 
 # Hyperparameters
-K = 10
+K = 5
 epochs = config.epochs
 batch_size = 32
 learning_rate = config.lr
 
-print(f"Starting {K}-Fold Cross-Validation...")
-folds = get_kfold_indices(num_samples, k=K, seed=42)
+# Learning rate scheduler multiplier for Cosine Annealing with Warmup
+def get_lr_multiplier(epoch, warmup_epochs=5, total_epochs=60):
+    if epoch < warmup_epochs:
+        # Linear warmup from 0.2x to 1.0x of base learning rate
+        return 0.2 + 0.8 * (epoch / warmup_epochs)
+    else:
+        # Cosine decay down to 0
+        progress = (epoch - warmup_epochs) / (total_epochs - warmup_epochs)
+        return 0.5 * (1.0 + np.cos(np.pi * progress))
+
+print(f"Starting {K}-Fold Group K-Fold Cross-Validation (grouped by species number)...")
+gkf = GroupKFold(n_splits=K)
 fold_val_rmses = []
 fold_models = []
 
-for fold in range(K):
+for fold, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups=species_ids)):
     print(f"\n--- Fold {fold+1}/{K} ---")
-    train_idx, val_idx = folds[fold]
+    train_species = np.unique(species_ids[train_idx])
+    val_species = np.unique(species_ids[val_idx])
+    print(f"  Training on species: {train_species}")
+    print(f"  Validating on species (unseen in training): {val_species}")
     
-    # Create datasets (inputs have shape (N, C, 1555), targets shape (N, 1))
-    train_dataset = dataset.WoodSpectralDataset(X[train_idx], y_log[train_idx], augment=True)
-    val_dataset = dataset.WoodSpectralDataset(X[val_idx], y_log[val_idx], augment=False)
+    # Create datasets (inputs shape: (N, 2, 1555), targets shape: (N, 1))
+    # Enable training-time augmentations only for training splits
+    train_dataset = dataset.WoodSpectralDataset(X[train_idx], y[train_idx], augment=True)
+    val_dataset = dataset.WoodSpectralDataset(X[val_idx], y[val_idx], augment=False)
     
     # Create dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -78,8 +74,11 @@ for fold in range(K):
     # Loss and optimizer (AdamW + Weight Decay)
     criterion = nn.MSELoss()
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
-    # Cosine annealing scheduler down to lr=1e-6
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
+    # Cosine Annealing with Warmup
+    scheduler = optim.lr_scheduler.LambdaLR(
+        optimizer, 
+        lr_lambda=lambda ep: get_lr_multiplier(ep, warmup_epochs=5, total_epochs=epochs)
+    )
     
     best_val_rmse = float('inf')
     best_weights_path = f"best_model_fold_{fold}.pth"
@@ -87,12 +86,12 @@ for fold in range(K):
     for epoch in range(epochs):
         model.train()
         train_loss = 0.0
-        for batch_x, batch_y_log in train_loader:
-            batch_x, batch_y_log = batch_x.to(device), batch_y_log.to(device)
+        for batch_x, batch_y in train_loader:
+            batch_x, batch_y = batch_x.to(device), batch_y.to(device)
             
             # Forward pass
-            preds_log = model(batch_x)
-            loss = criterion(preds_log, batch_y_log)
+            preds = model(batch_x)
+            loss = criterion(preds, batch_y)
             
             # Backward and optimize
             optimizer.zero_grad()
@@ -110,12 +109,10 @@ for fold in range(K):
         with torch.no_grad():
             for batch_x, _ in val_loader:
                 batch_x = batch_x.to(device)
-                preds_log = model(batch_x)
-                val_preds_list.append(preds_log.cpu().numpy())
+                preds = model(batch_x)
+                val_preds_list.append(preds.cpu().numpy())
         
-        val_preds_log = np.concatenate(val_preds_list, axis=0).squeeze()
-        # Transform back to original moisture content scale
-        val_preds_orig = np.expm1(val_preds_log)
+        val_preds_orig = np.concatenate(val_preds_list, axis=0).squeeze()
         val_y_orig = y[val_idx]
         
         # Calculate RMSE on original scale
@@ -126,7 +123,8 @@ for fold in range(K):
             torch.save(model.state_dict(), best_weights_path)
             
         if (epoch + 1) % 20 == 0 or epoch == epochs - 1:
-            print(f"Epoch {epoch+1:3d}/{epochs} | Train Loss (Log): {train_loss:.4f} | Val RMSE (Orig): {val_rmse:.4f} | Best Val RMSE: {best_val_rmse:.4f}")
+            current_lr = optimizer.param_groups[0]['lr']
+            print(f"Epoch {epoch+1:3d}/{epochs} | LR: {current_lr:.6f} | Train Loss: {train_loss:.4f} | Val RMSE: {val_rmse:.4f} | Best Val RMSE: {best_val_rmse:.4f}")
             
     print(f"Fold {fold+1} Best Val RMSE: {best_val_rmse:.4f}")
     fold_val_rmses.append(best_val_rmse)
@@ -135,7 +133,7 @@ for fold in range(K):
 mean_rmse = np.mean(fold_val_rmses)
 std_rmse = np.std(fold_val_rmses)
 print(f"\n==========================================")
-print(f"Cross-Validation Summary:")
+print(f"Group K-Fold Cross-Validation Summary:")
 for f, rmse in enumerate(fold_val_rmses):
     print(f"  Fold {f+1}: RMSE = {rmse:.4f}")
 print(f"Overall Estimation RMSE: {mean_rmse:.4f} ± {std_rmse:.4f}")
@@ -147,7 +145,7 @@ print(f"==========================================")
 # ==========================================
 print("\nLoading test.csv...")
 X_test, test_sample_numbers, test_species_ids = dataset.load_test_data("test.csv", use_savgol=True, use_snv=True)
-test_dataset = dataset.WoodSpectralDataset(X_test)
+test_dataset = dataset.WoodSpectralDataset(X_test, augment=False)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
 print("Running inference with ensembled fold models...")
@@ -161,15 +159,15 @@ for fold in range(K):
     model.load_state_dict(torch.load(best_weights_path))
     model.eval()
     
-    fold_preds_log = []
+    fold_preds = []
     with torch.no_grad():
         for batch_x in test_loader:
             batch_x = batch_x.to(device)
-            preds_log = model(batch_x)
-            fold_preds_log.append(preds_log.cpu().numpy())
+            preds = model(batch_x)
+            fold_preds.append(preds.cpu().numpy())
             
-    fold_preds_log = np.concatenate(fold_preds_log, axis=0).squeeze()
-    predictions_all.append(fold_preds_log)
+    fold_preds = np.concatenate(fold_preds, axis=0).squeeze()
+    predictions_all.append(fold_preds)
     
     # Cleanup weight file
     try:
@@ -177,14 +175,13 @@ for fold in range(K):
     except OSError:
         pass
 
-# Average the predictions on log scale (geometric mean ensembling) and invert
-avg_predictions_log = np.mean(predictions_all, axis=0)
-avg_predictions = np.expm1(avg_predictions_log)
+# Average the predictions (ensembling)
+avg_predictions = np.mean(predictions_all, axis=0)
 
-# Ensure no negative predictions (expm1 is naturally >= -1, but moisture must be > 0)
+# Ensure no negative predictions (moisture must be > 0)
 avg_predictions = np.clip(avg_predictions, a_min=0.01, a_max=None)
 
-# Create submission dataframe matching sample_submit.csv format (no header, sample ID, prediction)
+# Create submission dataframe matching sample_submit.csv format
 submission_df = pd.DataFrame({
     "sample_number": test_sample_numbers,
     "moisture_content": avg_predictions

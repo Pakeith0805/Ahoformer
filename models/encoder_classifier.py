@@ -65,9 +65,9 @@ class AhoformerSpectralEncoder(nn.Module):
     def __init__(self):
         super().__init__()
         # Conv1D to map the continuous 1D spectral signal to sequence embeddings
-        # input shape: (Batch, 3, 1555) -> output shape: (Batch, d_model, 129)
+        # input shape: (Batch, 2, 1555) -> output shape: (Batch, d_model, 129)
         self.embedding_layer = nn.Conv1d(
-            in_channels=3, 
+            in_channels=2, 
             out_channels=config.d_model, 
             kernel_size=16, 
             stride=12
@@ -91,7 +91,7 @@ class AhoformerSpectralEncoder(nn.Module):
         )
 
     def forward(self, x):
-        # x: shape (Batch, 1, 1555)
+        # x: shape (Batch, 2, 1555)
         
         # Project 1D spectral signal to sequence embeddings
         out = self.embedding_layer(x) # (Batch, d_model, 129)

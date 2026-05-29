@@ -7,11 +7,9 @@ from scipy.signal import savgol_filter
 class WoodSpectralDataset(Dataset):
     """
     PyTorch Dataset for Wood Near-Infrared (NIR) Spectra.
-    Each spectrum is shape (C, num_features) to represent a multi-channel 1D sequence.
-    C=3 represents:
-      - Channel 0: Raw (SNV normalized)
-      - Channel 1: 1st Derivative (SG smoothed, SNV normalized)
-      - Channel 2: 2nd Derivative (SG smoothed, SNV normalized)
+    Each spectrum is shape (C, num_features) to represent a 2-channel 1D sequence:
+      - Channel 0: 1st Derivative (SG smoothed, SNV normalized)
+      - Channel 1: 2nd Derivative (SG smoothed, SNV normalized)
     """
     def __init__(self, features, targets=None, augment=False):
         # features: np.ndarray of shape (N, C, num_features)
@@ -33,15 +31,12 @@ class WoodSpectralDataset(Dataset):
             # Apply training-time data augmentation on the cloned tensor
             x = x.clone()
             
-            # 1. Add random Gaussian noise to all channels
+            # 1. Add random Gaussian noise to all channels (simulates sensor noise)
             noise = torch.randn_like(x) * 0.005
             x = x + noise
             
-            # 2. Channel 0 (Raw): Add random baseline shift (distance shift)
-            raw_shift = torch.randn(1) * 0.05
-            x[0] = x[0] + raw_shift
-            
-            # 3. Apply random scale variations per channel (scattering variation)
+            # 2. Apply random scale variations per channel (simulates light scattering differences)
+            # Since derivatives have a zero baseline, we only scale the signal amplitude
             for c in range(x.size(0)):
                 scale = 1.0 + torch.randn(1) * 0.02
                 x[c] = x[c] * scale
@@ -55,7 +50,7 @@ def apply_savgol_derivative(x, window_length=21, polyorder=2, deriv=1):
     """
     Apply Savitzky-Golay filtering and calculate the derivative.
     Helps resolve overlapping peaks and removes baseline offsets.
-    Increased window_length to 21 to smooth high-frequency noise in derivatives.
+    Window length 21 is selected to smooth out high-frequency noise in the 2nd derivative.
     """
     return savgol_filter(x, window_length=window_length, polyorder=polyorder, deriv=deriv, axis=-1)
 
@@ -72,30 +67,24 @@ def apply_snv(x):
 
 def get_multichannel_features(X, use_savgol=True, use_snv=True):
     """
-    Extract multi-channel representations of NIR spectra:
-      - Channel 0: Raw (SNV normalized)
-      - Channel 1: 1st Derivative (SG window=21, poly=2, SNV normalized)
-      - Channel 2: 2nd Derivative (SG window=21, poly=2, SNV normalized)
-    Returns: np.ndarray of shape (N, 3, 1555)
+    Extract 2-channel derivative-only representations of NIR spectra:
+      - Channel 0: 1st Derivative (window=21, poly=2, deriv=1, SNV normalized)
+      - Channel 1: 2nd Derivative (window=21, poly=2, deriv=2, SNV normalized)
+    Returns: np.ndarray of shape (N, 2, 1555)
     """
     feats = []
     
-    # Channel 0: Raw
-    x0 = apply_snv(X) if use_snv else X
-    feats.append(x0)
+    # Channel 0: 1st Derivative
+    x1 = apply_savgol_derivative(X, window_length=21, polyorder=2, deriv=1)
+    if use_snv:
+        x1 = apply_snv(x1)
+    feats.append(x1)
     
-    if use_savgol:
-        # Channel 1: 1st Derivative (window=21, poly=2, deriv=1)
-        x1 = apply_savgol_derivative(X, window_length=21, polyorder=2, deriv=1)
-        if use_snv:
-            x1 = apply_snv(x1)
-        feats.append(x1)
-        
-        # Channel 2: 2nd Derivative (window=21, poly=2, deriv=2)
-        x2 = apply_savgol_derivative(X, window_length=21, polyorder=2, deriv=2)
-        if use_snv:
-            x2 = apply_snv(x2)
-        feats.append(x2)
+    # Channel 1: 2nd Derivative
+    x2 = apply_savgol_derivative(X, window_length=21, polyorder=2, deriv=2)
+    if use_snv:
+        x2 = apply_snv(x2)
+    feats.append(x2)
         
     return np.stack(feats, axis=1)
 
