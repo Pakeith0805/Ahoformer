@@ -15,8 +15,8 @@ class Encoder(nn.Module):
         self.layernorm1 = nn.LayerNorm(normalized_shape = config.d_model)
         self.layernorm2 = nn.LayerNorm(normalized_shape = config.d_model)
 
-        self.dropout1 = nn.Dropout(0.05)
-        self.dropout2 = nn.Dropout(0.05)
+        self.dropout1 = nn.Dropout(config.dropout)
+        self.dropout2 = nn.Dropout(config.dropout)
 
         # 普通のffn
         self.ffn = FFN(config.d_model, config.d_ff)

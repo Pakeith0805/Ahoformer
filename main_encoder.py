@@ -90,7 +90,7 @@ for fold, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups=species_ids))
     
     # Custom RMSE loss that evaluates RMSE on original scale directly
     criterion = CustomRMSELoss()
-    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=config.weight_decay)
     scheduler = optim.lr_scheduler.LambdaLR(
         optimizer, 
         lr_lambda=lambda ep: get_lr_multiplier(ep, warmup_epochs=5, total_epochs=epochs)

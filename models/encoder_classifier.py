@@ -76,9 +76,8 @@ class AhoformerSpectralEncoder(nn.Module):
         # Positional encoding for sequence length 129
         self.pos_encoder = PositionalEncoding(config.d_model, max_len=512)
         
-        # Encoder module (2-layer stack)
+        # Encoder module (1-layer stack to prevent overfitting)
         self.encoder = nn.Sequential(
-            Encoder(),
             Encoder()
         )
 
@@ -86,7 +85,7 @@ class AhoformerSpectralEncoder(nn.Module):
         self.regressor = nn.Sequential(
             nn.Linear(config.d_model, config.d_model),
             nn.ReLU(),
-            nn.Dropout(0.05),
+            nn.Dropout(config.dropout),
             nn.Linear(config.d_model, 1)
         )
 

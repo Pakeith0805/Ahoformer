@@ -32,7 +32,7 @@ class WoodSpectralDataset(Dataset):
             x = x.clone()
             
             # 1. Add random Gaussian noise to all channels (simulates sensor noise)
-            noise = torch.randn_like(x) * 0.005
+            noise = torch.randn_like(x) * 0.015
             x = x + noise
             
             # 2. Apply random scale variations per channel (simulates light scattering differences)
