@@ -32,13 +32,13 @@ class WoodSpectralDataset(Dataset):
             x = x.clone()
             
             # 1. Add random Gaussian noise to all channels (simulates sensor noise)
-            noise = torch.randn_like(x) * 0.015
+            noise = torch.randn_like(x) * 0.008
             x = x + noise
             
             # 2. Apply random scale variations per channel (simulates light scattering differences)
             # Since derivatives have a zero baseline, we only scale the signal amplitude
             for c in range(x.size(0)):
-                scale = 1.0 + torch.randn(1) * 0.02
+                scale = 1.0 + torch.randn(1) * 0.01
                 x[c] = x[c] * scale
                 
         if self.targets is not None:
@@ -65,12 +65,25 @@ def apply_snv(x):
     return (x - mean) / (std + 1e-8)
 
 
-def get_multichannel_features(X, use_savgol=True, use_snv=True):
+def get_wavenumber_mask(column_names):
     """
-    Extract 2-channel derivative-only representations of NIR spectra:
+    Generate boolean mask for water absorption bands from column names.
+    Water absorption bands:
+      - 7300-6300 cm-1 (includes O-H stretching overtone and hydrogen bonding)
+      - 5300-4700 cm-1 (expanded combination bands)
+    """
+    wavenumbers = np.array([float(col) for col in column_names])
+    mask1 = (wavenumbers >= 6300) & (wavenumbers <= 7300)
+    mask2 = (wavenumbers >= 4700) & (wavenumbers <= 5300)
+    return mask1 | mask2
+
+
+def get_multichannel_features(X, use_savgol=True, use_snv=True, wavenumber_mask=None):
+    """
+    Extract 1-channel 1st-derivative representation of NIR spectra:
       - Channel 0: 1st Derivative (window=21, poly=2, deriv=1, SNV normalized)
-      - Channel 1: 2nd Derivative (window=21, poly=2, deriv=2, SNV normalized)
-    Returns: np.ndarray of shape (N, 2, 1555)
+    Optionally filters the feature dimension to water absorption bands if wavenumber_mask is provided.
+    Returns: np.ndarray of shape (N, 1, num_features)
     """
     feats = []
     
@@ -78,13 +91,9 @@ def get_multichannel_features(X, use_savgol=True, use_snv=True):
     x1 = apply_savgol_derivative(X, window_length=21, polyorder=2, deriv=1)
     if use_snv:
         x1 = apply_snv(x1)
+    if wavenumber_mask is not None:
+        x1 = x1[:, wavenumber_mask]
     feats.append(x1)
-    
-    # Channel 1: 2nd Derivative
-    x2 = apply_savgol_derivative(X, window_length=21, polyorder=2, deriv=2)
-    if use_snv:
-        x2 = apply_snv(x2)
-    feats.append(x2)
         
     return np.stack(feats, axis=1)
 
@@ -98,7 +107,11 @@ def load_train_data(file_path="train.csv", use_savgol=True, use_snv=True):
     y = df.iloc[:, 3].values
     X = df.iloc[:, 4:].values
     
-    X_multi = get_multichannel_features(X, use_savgol=use_savgol, use_snv=use_snv)
+    # Generate wavenumber mask
+    spectral_cols = df.columns[4:]
+    wavenumber_mask = get_wavenumber_mask(spectral_cols)
+    
+    X_multi = get_multichannel_features(X, use_savgol=use_savgol, use_snv=use_snv, wavenumber_mask=wavenumber_mask)
         
     return X_multi, y, df["sample number"].values, df["species number"].values
 
@@ -112,6 +125,10 @@ def load_test_data(file_path="test.csv", use_savgol=True, use_snv=True):
     sample_numbers = df.iloc[:, 0].values
     X = df.iloc[:, 3:].values
     
-    X_multi = get_multichannel_features(X, use_savgol=use_savgol, use_snv=use_snv)
+    # Generate wavenumber mask
+    spectral_cols = df.columns[3:]
+    wavenumber_mask = get_wavenumber_mask(spectral_cols)
+    
+    X_multi = get_multichannel_features(X, use_savgol=use_savgol, use_snv=use_snv, wavenumber_mask=wavenumber_mask)
         
     return X_multi, sample_numbers, df["species number"].values

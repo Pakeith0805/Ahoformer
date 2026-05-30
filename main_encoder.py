@@ -5,11 +5,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from sklearn.model_selection import GroupKFold
-from sklearn.cross_decomposition import PLSRegression
 import config
 import dataset
 from models import AhoformerSpectralEncoder
+
 
 # Set random seed for reproducibility
 def set_seed(seed=42):
@@ -25,31 +24,34 @@ torch.set_num_threads(4)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
-# Custom RMSE Loss with clamped log predictions to prevent gradient explosion
-class CustomRMSELoss(nn.Module):
-    def __init__(self):
-        super().__init__()
+# K-Fold split generator (pure numpy, 100% robust Random K-Fold)
+def get_kfold_indices(n, k=5, seed=42):
+    indices = np.arange(n)
+    np.random.seed(seed)
+    np.random.shuffle(indices)
+    fold_sizes = np.full(k, n // k, dtype=int)
+    fold_sizes[:n % k] += 1
+    current = 0
+    folds = []
+    for fold_size in fold_sizes:
+        val_indices = indices[current:current + fold_size]
+        train_indices = np.concatenate([indices[:current], indices[current + fold_size:]])
+        folds.append((train_indices, val_indices))
+        current += fold_size
+    return folds
 
-    def forward(self, preds_log, targets_orig):
-        # Clamp log predictions between -0.01 and 5.7 (approx. 300% moisture content)
-        # This mathematically prevents exponential gradient explosion from torch.expm1
-        preds_log_clamped = torch.clamp(preds_log, min=-0.01, max=5.7)
-        preds_orig = torch.expm1(preds_log_clamped)
-        # Calculate RMSE directly against original scale targets
-        return torch.sqrt(torch.mean((preds_orig - targets_orig) ** 2) + 1e-8)
-
-# 1. Load the training data (applies Savitzky-Golay 1st & 2nd derivative + SNV scaling -> 2 channels)
+# 1. Load the training data (applies Savitzky-Golay 1st derivative + SNV scaling -> 1 channel)
 print("Loading train.csv...")
 X, y, sample_ids, species_ids = dataset.load_train_data("train.csv", use_savgol=True, use_snv=True)
 num_samples = X.shape[0]
 num_features = X.shape[2]
-print(f"Loaded {num_samples} samples with {num_features} wavelengths (2 channels).")
+print(f"Loaded {num_samples} samples with {num_features} wavelengths (1 channel).")
 
 # Create log-transformed targets for Stage 1 training
 y_log = np.log1p(y)
 
 # Hyperparameters
-K = 5
+K = 10
 epochs = config.epochs
 batch_size = 32
 learning_rate = config.lr
@@ -62,24 +64,20 @@ def get_lr_multiplier(epoch, warmup_epochs=5, total_epochs=60):
         progress = (epoch - warmup_epochs) / (total_epochs - warmup_epochs)
         return 0.5 * (1.0 + np.cos(np.pi * progress))
 
-print(f"Starting {K}-Fold Group K-Fold Cross-Validation (grouped by species number)...")
-gkf = GroupKFold(n_splits=K)
+print(f"Starting {K}-Fold Cross-Validation (Random K-Fold)...")
+folds = get_kfold_indices(num_samples, k=K, seed=42)
 fold_val_rmses = []
-fold_pls_models = []
+fold_val_rmses = []
 
-for fold, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups=species_ids)):
+for fold in range(K):
     print(f"\n--- Fold {fold+1}/{K} ---")
-    train_species = np.unique(species_ids[train_idx])
-    val_species = np.unique(species_ids[val_idx])
-    print(f"  Training on species: {train_species}")
-    print(f"  Validating on species (unseen in training): {val_species}")
+    train_idx, val_idx = folds[fold]
     
     # ----------------------------------------------------------------
-    # === Stage 1: Pretrain Transformer Feature Extractor ===
+    # === Stage 1: Train Transformer Feature Extractor ===
     # ----------------------------------------------------------------
-    print(f"  [Stage 1] Pretraining Transformer on log-scale targets with Custom RMSE loss...")
+    print(f"  Training Transformer on log-scale targets with MSE loss...")
     
-    # Feed y_log for dataset targets (to match log predictions of Transformer)
     train_dataset = dataset.WoodSpectralDataset(X[train_idx], y_log[train_idx], augment=True)
     val_dataset = dataset.WoodSpectralDataset(X[val_idx], y_log[val_idx], augment=False)
     
@@ -88,8 +86,7 @@ for fold, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups=species_ids))
     
     model = AhoformerSpectralEncoder().to(device)
     
-    # Custom RMSE loss that evaluates RMSE on original scale directly
-    criterion = CustomRMSELoss()
+    criterion = nn.MSELoss()
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=config.weight_decay)
     scheduler = optim.lr_scheduler.LambdaLR(
         optimizer, 
@@ -104,11 +101,9 @@ for fold, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups=species_ids))
         train_loss = 0.0
         for batch_x, batch_y_log in train_loader:
             batch_x, batch_y_log = batch_x.to(device), batch_y_log.to(device)
-            # Reconstruct original scale targets for loss computation
-            batch_y_orig = torch.expm1(batch_y_log)
             
             preds_log = model(batch_x)
-            loss = criterion(preds_log, batch_y_orig)
+            loss = criterion(preds_log, batch_y_log)
             
             optimizer.zero_grad()
             loss.backward()
@@ -119,7 +114,7 @@ for fold, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups=species_ids))
         scheduler.step()
         train_loss /= len(train_idx)
         
-        # Validation for Stage 1
+        # Validation
         model.eval()
         val_preds_log_list = []
         with torch.no_grad():
@@ -129,8 +124,6 @@ for fold, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups=species_ids))
                 val_preds_log_list.append(preds_log.cpu().numpy())
         
         val_preds_log = np.concatenate(val_preds_log_list, axis=0).squeeze()
-        # Apply clamp to validation predictions as well for consistency
-        val_preds_log = np.clip(val_preds_log, a_min=-0.01, a_max=5.7)
         val_preds_orig = np.expm1(val_preds_log)
         val_y_orig = y[val_idx]
         
@@ -142,69 +135,16 @@ for fold, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups=species_ids))
             
         if (epoch + 1) % 20 == 0 or epoch == epochs - 1:
             current_lr = optimizer.param_groups[0]['lr']
-            print(f"    Epoch {epoch+1:3d}/{epochs} | LR: {current_lr:.6f} | Train Loss (RMSE): {train_loss:.4f} | Val RMSE: {val_rmse:.4f} | Best Val RMSE: {best_val_rmse:.4f}")
+            print(f"    Epoch {epoch+1:3d}/{epochs} | LR: {current_lr:.6f} | Train Loss (Log MSE): {train_loss:.4f} | Val RMSE (Orig): {val_rmse:.4f} | Best Val RMSE: {best_val_rmse:.4f}")
             
-    print(f"  [Stage 1] Pretraining finished. Best Transformer Val RMSE: {best_val_rmse:.4f}")
-    
-    # ----------------------------------------------------------------
-    # === Stage 2: Extract Features & Fit PLS Regressor ===
-    # ----------------------------------------------------------------
-    print(f"  [Stage 2] Loading best Transformer, extracting features, and fitting PLS...")
-    
-    # Load pretrained best weights
-    model.load_state_dict(torch.load(best_weights_path))
-    model.eval()
-    
-    # Helper to extract 128-dimensional features
-    def extract_features(loader):
-        features_all = []
-        with torch.no_grad():
-            for batch_x, _ in loader:
-                batch_x = batch_x.to(device)
-                feats = model(batch_x, return_features=True)
-                features_all.append(feats.cpu().numpy())
-        return np.concatenate(features_all, axis=0)
-    
-    # Features from Stage 1 are derived from non-augmented inputs for stability
-    train_dataset_eval = dataset.WoodSpectralDataset(X[train_idx], y[train_idx], augment=False)
-    train_loader_eval = DataLoader(train_dataset_eval, batch_size=batch_size, shuffle=False)
-    
-    X_train_feats = extract_features(train_loader_eval)
-    X_val_feats = extract_features(val_loader)
-    
-    y_train_orig = y[train_idx]
-    y_val_orig = y[val_idx]
-    
-    # Search for the best number of PLS latent components (1 to 15)
-    best_pls_rmse = float('inf')
-    best_n_components = 2
-    best_pls_model = None
-    
-    for n_comp in range(1, 16):
-        pls = PLSRegression(n_components=n_comp)
-        pls.fit(X_train_feats, y_train_orig)
-        
-        # Predict validation set
-        val_preds_pls = pls.predict(X_val_feats).squeeze()
-        # Clip negative predictions
-        val_preds_pls = np.clip(val_preds_pls, a_min=0.01, a_max=None)
-        
-        pls_rmse = np.sqrt(np.mean((val_preds_pls - y_val_orig) ** 2))
-        if pls_rmse < best_pls_rmse:
-            best_pls_rmse = pls_rmse
-            best_n_components = n_comp
-            best_pls_model = pls
-            
-    print(f"  [Stage 2] Fold {fold+1} Optimal PLS Components: {best_n_components} | Validation RMSE: {best_pls_rmse:.4f}")
-    
-    fold_pls_models.append(best_pls_model)
-    fold_val_rmses.append(best_pls_rmse)
+    print(f"  Fold {fold+1} Best Val RMSE: {best_val_rmse:.4f}")
+    fold_val_rmses.append(best_val_rmse)
 
-# Summary of hybrid pipeline
+# Summary of pipeline
 mean_rmse = np.mean(fold_val_rmses)
 std_rmse = np.std(fold_val_rmses)
 print(f"\n==========================================")
-print(f"Hybrid Transformer-PLS Validation Summary:")
+print(f"Transformer Validation Summary:")
 for f, rmse in enumerate(fold_val_rmses):
     print(f"  Fold {f+1}: RMSE = {rmse:.4f}")
 print(f"Overall Estimation RMSE: {mean_rmse:.4f} ± {std_rmse:.4f}")
@@ -219,7 +159,7 @@ X_test, test_sample_numbers, test_species_ids = dataset.load_test_data("test.csv
 test_dataset = dataset.WoodSpectralDataset(X_test, augment=False)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-print("Running inference with ensembled fold models (Transformer + PLS)...")
+print("Running inference with ensembled fold models (Transformer End-to-End)...")
 predictions_all = []
 
 for fold in range(K):
@@ -229,19 +169,16 @@ for fold in range(K):
     model.load_state_dict(torch.load(best_weights_path))
     model.eval()
     
-    # Extract 128-dimensional features for test set
-    test_features_list = []
+    # Predict directly with Transformer (log-scale)
+    fold_preds_log_list = []
     with torch.no_grad():
         for batch_x in test_loader:
             batch_x = batch_x.to(device)
-            feats = model(batch_x, return_features=True)
-            test_features_list.append(feats.cpu().numpy())
-    test_features = np.concatenate(test_features_list, axis=0)
-    
-    # Predict using the fold's trained PLS regression
-    pls_model = fold_pls_models[fold]
-    fold_preds = pls_model.predict(test_features).squeeze()
-    predictions_all.append(fold_preds)
+            preds_log = model(batch_x)
+            fold_preds_log_list.append(preds_log.cpu().numpy())
+            
+    fold_preds_log = np.concatenate(fold_preds_log_list, axis=0).squeeze()
+    predictions_all.append(fold_preds_log)
     
     # Cleanup weight file
     try:
@@ -249,8 +186,9 @@ for fold in range(K):
     except OSError:
         pass
 
-# Average the predictions (ensembling) using Median to suppress outliers
-avg_predictions = np.median(predictions_all, axis=0)
+# Average predictions in log-space (Geometric Mean ensembling) and invert
+avg_predictions_log = np.mean(predictions_all, axis=0)
+avg_predictions = np.expm1(avg_predictions_log)
 
 # Ensure no negative predictions (moisture must be > 0)
 avg_predictions = np.clip(avg_predictions, a_min=0.01, a_max=None)
