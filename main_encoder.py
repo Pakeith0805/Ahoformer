@@ -40,12 +40,12 @@ def get_kfold_indices(n, k=5, seed=42):
         current += fold_size
     return folds
 
-# 1. Load the training data (applies Savitzky-Golay 1st derivative + SNV scaling -> 1 channel)
+# 1. Load the training data (applies Savitzky-Golay 1st derivative + SNV scaling -> 2 channels)
 print("Loading train.csv...")
-X, y, sample_ids, species_ids = dataset.load_train_data("train.csv", use_savgol=True, use_snv=True)
+X, y, sample_ids, species_ids = dataset.load_train_data("train.csv", use_savgol=True, use_snv=True, use_msc=False)
 num_samples = X.shape[0]
 num_features = X.shape[2]
-print(f"Loaded {num_samples} samples with {num_features} wavelengths (1 channel).")
+print(f"Loaded {num_samples} samples with {num_features} wavelengths (2 channels).")
 
 # Create log-transformed targets for Stage 1 training
 y_log = np.log1p(y)
@@ -136,6 +136,10 @@ for fold in range(K):
         if (epoch + 1) % 20 == 0 or epoch == epochs - 1:
             current_lr = optimizer.param_groups[0]['lr']
             print(f"    Epoch {epoch+1:3d}/{epochs} | LR: {current_lr:.6f} | Train Loss (Log MSE): {train_loss:.4f} | Val RMSE (Orig): {val_rmse:.4f} | Best Val RMSE: {best_val_rmse:.4f}")
+        
+        # Write progress to temporary file for live tracking
+        with open("progress.txt", "w") as pf:
+            pf.write(f"Fold: {fold+1}/{K}\nEpoch: {epoch+1}/{epochs}\nBest Val RMSE: {best_val_rmse:.4f}\n")
             
     print(f"  Fold {fold+1} Best Val RMSE: {best_val_rmse:.4f}")
     fold_val_rmses.append(best_val_rmse)
@@ -155,7 +159,7 @@ print(f"==========================================")
 # === Inference on test.csv
 # ==========================================
 print("\nLoading test.csv...")
-X_test, test_sample_numbers, test_species_ids = dataset.load_test_data("test.csv", use_savgol=True, use_snv=True)
+X_test, test_sample_numbers, test_species_ids = dataset.load_test_data("test.csv", use_savgol=True, use_snv=True, use_msc=False)
 test_dataset = dataset.WoodSpectralDataset(X_test, augment=False)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
@@ -186,7 +190,7 @@ for fold in range(K):
     except OSError:
         pass
 
-# Average predictions in log-space (Geometric Mean ensembling) and invert
+# Average predictions in log-space (Simple Geometric Mean ensembling)
 avg_predictions_log = np.mean(predictions_all, axis=0)
 avg_predictions = np.expm1(avg_predictions_log)
 
@@ -203,3 +207,7 @@ submission_df = pd.DataFrame({
 submission_df.to_csv("submission.csv", index=False, header=False)
 print("Saved final ensembled predictions to submission.csv.")
 print(f"Predictions stats: Min={avg_predictions.min():.2f}, Max={avg_predictions.max():.2f}, Mean={avg_predictions.mean():.2f}")
+
+# Write completed state to progress.txt
+with open("progress.txt", "w") as pf:
+    pf.write("Completed!\n")
