@@ -40,12 +40,12 @@ def get_kfold_indices(n, k=5, seed=42):
         current += fold_size
     return folds
 
-# 1. Load the training data (applies Savitzky-Golay 1st derivative + SNV scaling -> 2 channels)
+# 1. Load the training data (applies Savitzky-Golay 1st derivative + SNV scaling -> 1 channel)
 print("Loading train.csv...")
 X, y, sample_ids, species_ids = dataset.load_train_data("train.csv", use_savgol=True, use_snv=True, use_msc=False)
 num_samples = X.shape[0]
 num_features = X.shape[2]
-print(f"Loaded {num_samples} samples with {num_features} wavelengths (2 channels).")
+print(f"Loaded {num_samples} samples with {num_features} wavelengths (1 channel).")
 
 # Create log-transformed targets for Stage 1 training
 y_log = np.log1p(y)
@@ -78,7 +78,7 @@ for fold in range(K):
     # ----------------------------------------------------------------
     print(f"  Training Transformer on log-scale targets with MSE loss...")
     
-    train_dataset = dataset.WoodSpectralDataset(X[train_idx], y_log[train_idx], augment=True)
+    train_dataset = dataset.WoodSpectralDataset(X[train_idx], y_log[train_idx], augment=False)
     val_dataset = dataset.WoodSpectralDataset(X[val_idx], y_log[val_idx], augment=False)
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
