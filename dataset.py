@@ -102,26 +102,36 @@ def get_wavenumber_mask(column_names):
     return mask1 | mask2
 
 
-def get_multichannel_features(X, use_savgol=True, use_snv=True, use_msc=False, wavenumber_mask=None):
+def get_multichannel_features(X, use_savgol=True, use_snv=True, use_msc=False, wavenumber_mask=None, num_channels=1):
     """
-    Extract 1-channel representation of NIR spectra:
+    Extract multi-channel representation of NIR spectra:
       - Channel 0: 1st Derivative (window=15, poly=2, deriv=1, SNV normalized)
-    Returns: np.ndarray of shape (N, 1, num_features)
+      - Channel 1 (optional): 2nd Derivative (window=15, poly=2, deriv=2, SNV normalized)
+    Returns: np.ndarray of shape (N, C, num_features)
     """
     feats = []
     
-    # Apply SG smoothing & derivative
+    # Channel 0: 1st derivative
     x1 = apply_savgol_derivative(X, window_length=15, polyorder=2, deriv=1)
     if use_snv:
         x1 = apply_snv(x1)
     if wavenumber_mask is not None:
         x1 = x1[:, wavenumber_mask]
     feats.append(x1)
+    
+    # Channel 1: 2nd derivative
+    if num_channels == 2:
+        x2 = apply_savgol_derivative(X, window_length=15, polyorder=2, deriv=2)
+        if use_snv:
+            x2 = apply_snv(x2)
+        if wavenumber_mask is not None:
+            x2 = x2[:, wavenumber_mask]
+        feats.append(x2)
         
     return np.stack(feats, axis=1)
 
 
-def load_train_data(file_path="train.csv", use_savgol=True, use_snv=True, use_msc=False):
+def load_train_data(file_path="train.csv", use_savgol=True, use_snv=True, use_msc=False, num_channels=1):
     """
     Load training data, extract multi-channel features and targets.
     """
@@ -134,18 +144,14 @@ def load_train_data(file_path="train.csv", use_savgol=True, use_snv=True, use_ms
     # Compute and save the training reference spectrum for MSC (if ever needed)
     _reference_spectrum = X.mean(axis=0)
     
-    # Generate wavenumber mask
-    spectral_cols = df.columns[4:]
-    wavenumber_mask = get_wavenumber_mask(spectral_cols)
-    
     X_multi = get_multichannel_features(
-        X, use_savgol=use_savgol, use_snv=use_snv, use_msc=use_msc, wavenumber_mask=None
+        X, use_savgol=use_savgol, use_snv=use_snv, use_msc=use_msc, wavenumber_mask=None, num_channels=num_channels
     )
         
     return X_multi, y, df["sample number"].values, df["species number"].values
 
 
-def load_test_data(file_path="test.csv", use_savgol=True, use_snv=True, use_msc=False):
+def load_test_data(file_path="test.csv", use_savgol=True, use_snv=True, use_msc=False, num_channels=1):
     """
     Load test data, extract multi-channel features.
     """
@@ -154,12 +160,8 @@ def load_test_data(file_path="test.csv", use_savgol=True, use_snv=True, use_msc=
     sample_numbers = df.iloc[:, 0].values
     X = df.iloc[:, 3:].values
     
-    # Generate wavenumber mask
-    spectral_cols = df.columns[3:]
-    wavenumber_mask = get_wavenumber_mask(spectral_cols)
-    
     X_multi = get_multichannel_features(
-        X, use_savgol=use_savgol, use_snv=use_snv, use_msc=use_msc, wavenumber_mask=None
+        X, use_savgol=use_savgol, use_snv=use_snv, use_msc=use_msc, wavenumber_mask=None, num_channels=num_channels
     )
         
     return X_multi, sample_numbers, df["species number"].values
