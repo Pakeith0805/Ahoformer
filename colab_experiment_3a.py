@@ -68,14 +68,15 @@ def get_kfold_indices(n, k=10, seed=42):
     return folds
 
 K = 10
-epochs = 100
+epochs = 120 # Extended epochs to allow 3-layer model to fully converge
 batch_size = 32
 learning_rate = 0.0003
 weight_decay = 0.001
 mixup_prob = 0.8
 alpha = 0.4
+num_layers = 3 # 3-Layer Transformer Encoder
 
-print(f"Starting Experiment 2C: High-Res 2-Channel (Sequence Length 258) (10-Fold CV)...")
+print(f"Starting Experiment 3A: 3-Layer Encoder + Mixup 0.8 (10-Fold CV)...")
 folds = get_kfold_indices(len(X), k=K, seed=42)
 fold_val_rmses = []
 predictions_all = []
@@ -95,15 +96,13 @@ for fold in range(K):
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     
-    model = AhoformerSpectralEncoder().to(device)
-    
-    # Configure Conv1D embedding layer to accept 2 input channels
-    # kernel_size=12, stride=6 projects 1555 wavelengths to a sequence of length 258
+    # Initialize with 3 layers
+    model = AhoformerSpectralEncoder(num_layers=num_layers).to(device)
     model.embedding_layer = nn.Conv1d(
         in_channels=2, 
         out_channels=config.d_model, 
-        kernel_size=12, 
-        stride=6
+        kernel_size=16, 
+        stride=12
     ).to(device)
         
     criterion = nn.MSELoss()
@@ -111,7 +110,7 @@ for fold in range(K):
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
     
     best_val_rmse = float('inf')
-    best_weights_path = f"best_model_exp2c_fold_{fold}.pth"
+    best_weights_path = f"best_model_exp3a_fold_{fold}.pth"
     
     for epoch in range(epochs):
         model.train()
@@ -181,7 +180,7 @@ for fold in range(K):
 mean_rmse = np.mean(fold_val_rmses)
 std_rmse = np.std(fold_val_rmses)
 print(f"\n==========================================")
-print(f"Experiment 2C (High-Res) CV Summary:")
+print(f"Experiment 3A (3-Layer + 0.8 Mixup) CV Summary:")
 print(f"Overall Estimation RMSE: {mean_rmse:.4f} ± {std_rmse:.4f}")
 print(f"==========================================")
 
@@ -193,5 +192,5 @@ avg_predictions = np.clip(avg_predictions, 0.01, None)
 pd.DataFrame({
     "sample_number": test_sample_numbers,
     "moisture_content": avg_predictions
-}).to_csv("submission_exp2c.csv", index=False, header=False)
-print("Saved predictions to submission_exp2c.csv")
+}).to_csv("submission_exp3a.csv", index=False, header=False)
+print("Saved predictions to submission_exp3a.csv")

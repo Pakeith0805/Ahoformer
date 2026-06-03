@@ -36,21 +36,34 @@ def mixup_data(x, y, alpha=0.4):
     mixed_y = lam * y + (1 - lam) * y[index]
     return mixed_x, mixed_y
 
-class WoodDataset(Dataset):
-    def __init__(self, x, y=None):
+class AugmentWoodDataset(Dataset):
+    def __init__(self, x, y=None, augment=False):
         self.x = torch.tensor(x, dtype=torch.float32)
         if y is not None:
             self.y = torch.tensor(y, dtype=torch.float32).unsqueeze(1)
         else:
             self.y = None
+        self.augment = augment
             
     def __len__(self):
         return len(self.x)
         
     def __getitem__(self, idx):
+        x = self.x[idx].clone() # (C, num_features)
+        
+        if self.augment:
+            # 1. Add random Gaussian noise to all channels (std=0.01)
+            noise = torch.randn_like(x) * 0.01
+            x = x + noise
+            
+            # 2. Channel-wise scaling (std=0.02)
+            for c in range(x.size(0)):
+                scale = 1.0 + torch.randn(1) * 0.02
+                x[c] = x[c] * scale
+                
         if self.y is not None:
-            return self.x[idx], self.y[idx]
-        return self.x[idx]
+            return x, self.y[idx]
+        return x
 
 def get_kfold_indices(n, k=10, seed=42):
     indices = np.arange(n)
@@ -68,42 +81,41 @@ def get_kfold_indices(n, k=10, seed=42):
     return folds
 
 K = 10
-epochs = 100
+epochs = 120 # Extended epochs to allow 3-layer model to fully converge
 batch_size = 32
 learning_rate = 0.0003
 weight_decay = 0.001
 mixup_prob = 0.8
 alpha = 0.4
+num_layers = 3 # 3-Layer Transformer Encoder
 
-print(f"Starting Experiment 2C: High-Res 2-Channel (Sequence Length 258) (10-Fold CV)...")
+print(f"Starting Experiment 3C: 3-Layer + Amplitude/Noise Augmentation + Mixup 0.8 (10-Fold CV)...")
 folds = get_kfold_indices(len(X), k=K, seed=42)
 fold_val_rmses = []
 predictions_all = []
 
 # Load test data
 X_test, test_sample_numbers, test_species_ids = dataset.load_test_data("test.csv", use_savgol=True, use_snv=True, use_msc=False, num_channels=2)
-test_dataset = WoodDataset(X_test)
+test_dataset = AugmentWoodDataset(X_test, augment=False)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
 for fold in range(K):
     print(f"\n--- Fold {fold+1}/{K} ---")
     train_idx, val_idx = folds[fold]
     
-    train_dataset = WoodDataset(X[train_idx], y_log[train_idx])
-    val_dataset = WoodDataset(X[val_idx], y_log[val_idx])
+    train_dataset = AugmentWoodDataset(X[train_idx], y_log[train_idx], augment=True)
+    val_dataset = AugmentWoodDataset(X[val_idx], y_log[val_idx], augment=False)
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     
-    model = AhoformerSpectralEncoder().to(device)
-    
-    # Configure Conv1D embedding layer to accept 2 input channels
-    # kernel_size=12, stride=6 projects 1555 wavelengths to a sequence of length 258
+    # Initialize with 3 layers
+    model = AhoformerSpectralEncoder(num_layers=num_layers).to(device)
     model.embedding_layer = nn.Conv1d(
         in_channels=2, 
         out_channels=config.d_model, 
-        kernel_size=12, 
-        stride=6
+        kernel_size=16, 
+        stride=12
     ).to(device)
         
     criterion = nn.MSELoss()
@@ -111,7 +123,7 @@ for fold in range(K):
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
     
     best_val_rmse = float('inf')
-    best_weights_path = f"best_model_exp2c_fold_{fold}.pth"
+    best_weights_path = f"best_model_exp3c_fold_{fold}.pth"
     
     for epoch in range(epochs):
         model.train()
@@ -181,7 +193,7 @@ for fold in range(K):
 mean_rmse = np.mean(fold_val_rmses)
 std_rmse = np.std(fold_val_rmses)
 print(f"\n==========================================")
-print(f"Experiment 2C (High-Res) CV Summary:")
+print(f"Experiment 3C (3-Layer + Augmentation) CV Summary:")
 print(f"Overall Estimation RMSE: {mean_rmse:.4f} ± {std_rmse:.4f}")
 print(f"==========================================")
 
@@ -193,5 +205,5 @@ avg_predictions = np.clip(avg_predictions, 0.01, None)
 pd.DataFrame({
     "sample_number": test_sample_numbers,
     "moisture_content": avg_predictions
-}).to_csv("submission_exp2c.csv", index=False, header=False)
-print("Saved predictions to submission_exp2c.csv")
+}).to_csv("submission_exp3c.csv", index=False, header=False)
+print("Saved predictions to submission_exp3c.csv")
