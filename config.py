@@ -4,12 +4,14 @@
 num_head = 4
 d_model = 128 # 単語の次元数
 d_k = d_model // num_head
-epochs = 60
-lr = 0.001
+epochs = 80
+lr = 0.0003
 num_digits = 8 # 何桁の数字まで扱えるようにするか
 d_ff = 256 # FFNの中間層の隠れ次元数
 dropout = 0.05
-weight_decay = 1e-4
+weight_decay = 0.001
+mixup_prob = 0.5
+mixup_alpha = 0.4
 num_train_data = 40000
 num_test_data = 10000
 # --- スイッチの設定 ---

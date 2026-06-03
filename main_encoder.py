@@ -40,6 +40,17 @@ def get_kfold_indices(n, k=5, seed=42):
         current += fold_size
     return folds
 
+def mixup_data(x, y, alpha=0.4):
+    if alpha > 0:
+        lam = np.random.beta(alpha, alpha)
+    else:
+        lam = 1
+    batch_size = x.size()[0]
+    index = torch.randperm(batch_size)
+    mixed_x = lam * x + (1 - lam) * x[index, :]
+    mixed_y = lam * y + (1 - lam) * y[index]
+    return mixed_x, mixed_y
+
 # 1. Load the training data (applies Savitzky-Golay 1st derivative + SNV scaling -> 1 channel)
 print("Loading train.csv...")
 X, y, sample_ids, species_ids = dataset.load_train_data("train.csv", use_savgol=True, use_snv=True, use_msc=False)
@@ -88,10 +99,7 @@ for fold in range(K):
     
     criterion = nn.MSELoss()
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=config.weight_decay)
-    scheduler = optim.lr_scheduler.LambdaLR(
-        optimizer, 
-        lr_lambda=lambda ep: get_lr_multiplier(ep, warmup_epochs=5, total_epochs=epochs)
-    )
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
     
     best_val_rmse = float('inf')
     best_weights_path = f"best_model_fold_{fold}.pth"
@@ -102,6 +110,9 @@ for fold in range(K):
         for batch_x, batch_y_log in train_loader:
             batch_x, batch_y_log = batch_x.to(device), batch_y_log.to(device)
             
+            if np.random.rand() < config.mixup_prob:
+                batch_x, batch_y_log = mixup_data(batch_x, batch_y_log, alpha=config.mixup_alpha)
+                
             preds_log = model(batch_x)
             loss = criterion(preds_log, batch_y_log)
             
