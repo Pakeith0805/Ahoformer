@@ -55,7 +55,8 @@ with open("eda_summary.txt", "w", encoding="utf-8") as f:
     
     # Species statistics in train
     f.write("--- Species Distribution and Moisture Stats ---\n")
-    species_summary = train_df.groupby("species number")["moisture_content"].agg(["count", "mean", "std", "min", "max"])
+    moisture_col = train_df.columns[3]
+    species_summary = train_df.groupby("species number")[moisture_col].agg(["count", "mean", "std", "min", "max"])
     f.write(species_summary.to_string())
     f.write("\n\n")
 
@@ -78,7 +79,7 @@ X_test_2d = savgol_filter(X_test_raw, window_length=15, polyorder=2, deriv=2, ax
 X_train_snv = apply_snv(X_train_raw)
 X_test_snv = apply_snv(X_test_raw)
 X_train_1d_snv = apply_snv(X_train_1d)
-X_test_1d_snv = apply_snv(X_train_1d)
+X_test_1d_snv = apply_snv(X_test_1d)
 X_train_2d_snv = apply_snv(X_train_2d)
 X_test_2d_snv = apply_snv(X_test_2d)
 
